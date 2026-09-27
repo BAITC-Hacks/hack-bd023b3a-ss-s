@@ -25,7 +25,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from qorgan.config import get_config
-from qorgan.data.schema import Dialogue, Label, TacticTag, Utterance, spans_from_phrases
+from qorgan.data.schema import HARD_NEGATIVE_RISK, Dialogue, Label, TacticTag, Utterance, spans_from_phrases
 from qorgan.llm_tools import LLMResponseError, generate_json, is_transient, thinking_budget_for
 from qorgan.taxonomy import NegativeCategory, TacticDefinition, get_taxonomy
 
@@ -37,7 +37,6 @@ _MAX_TOKENS = 4096
 # Provisional risk assigned to generation-time (pre-label.py) dialogues. Day 2's
 # label.py replaces these with independently-assessed risk scores.
 _SEED_POSITIVE_RISK = 0.9
-_SEED_HARD_NEGATIVE_RISK = 0.02
 
 # A corpus run is hundreds of calls; one transient failure must not discard the batch (D53).
 _MAX_ATTEMPTS = 3
@@ -246,7 +245,7 @@ def generate_hard_negative(
         dialogue_id=dialogue_id or f"neg_{category_id}_{language}",
         language=language,
         tags=(),
-        risk=_SEED_HARD_NEGATIVE_RISK,
+        risk=HARD_NEGATIVE_RISK,
         is_hard_negative=True,
         force_empty_spans=True,
     )

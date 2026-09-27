@@ -188,7 +188,7 @@ def test_dialogue_language_must_be_supported():
     with pytest.raises(ValidationError):
         Dialogue(
             id="d1",
-            language="en",
+            language="de",
             utterances=[Utterance(speaker="caller", text="hi")],
             label=Label(risk=0.1),
         )
@@ -363,3 +363,17 @@ def test_organization_is_frozen():
     org = Organization(id="org1", members=["d1"])
     with pytest.raises(ValidationError):
         org.priority = 1.0
+
+
+def test_dialogue_accepts_english_as_a_call_language():
+    """English is a call language too (ADR D53) -- the corpus enum, not the UI locale."""
+    dialogue = Dialogue(
+        id="en_smoke",
+        language="en",
+        utterances=(
+            Utterance(speaker="caller", text="This is your bank's security service."),
+            Utterance(speaker="callee", text="Which bank?"),
+        ),
+        label=Label(risk=0.9, tactic_tags=(TacticTag(id="impersonation_bank", weight=0.9),)),
+    )
+    assert dialogue.language == "en"

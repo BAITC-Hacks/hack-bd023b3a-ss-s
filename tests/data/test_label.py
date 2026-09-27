@@ -180,3 +180,25 @@ def test_label_corpus_streams_and_skips_already_labeled():
     assert [d.id for d in out] == ["second"]
     assert seen == ["second"]
     assert client.calls == 1, "a skipped dialogue costs no API call"
+
+
+def test_relabelling_never_turns_a_hard_negative_into_a_scam():
+    """Hard negatives are legit BY CONSTRUCTION (generate.py forces risk 0.02, no tags).
+
+    The labeller reads a transcript blind, and on a legitimate bank call that verifies an
+    identity it happily returns risk 1.0 with tactic tags -- observed on 32 of 50 English
+    negatives (ADR D54). Folding that in would poison the class FPR is measured on.
+    """
+    dialogue = _dialogue(["This is your bank, I need to verify your identity."], hard_negative=True, risk=0.02)
+    client = FakeClient([_response({
+        "risk": 1.0,
+        "tactic_tags": [{"id": "impersonation_bank", "weight": 0.9}],
+        "trigger_phrases": ["verify your identity"],
+    })])
+
+    relabeled = label_dialogue(dialogue, client=client)
+
+    assert relabeled.label.is_hard_negative is True
+    assert relabeled.label.risk <= 0.1, "a legit call must not be relabelled as a scam"
+    assert relabeled.label.tactic_tags == ()
+    assert relabeled.label.trigger_spans == ()

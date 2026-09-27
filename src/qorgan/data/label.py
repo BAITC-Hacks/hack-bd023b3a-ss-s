@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from qorgan.config import get_config
-from qorgan.data.schema import Dialogue, Label, TacticTag, spans_from_phrases
+from qorgan.data.schema import HARD_NEGATIVE_RISK, Dialogue, Label, TacticTag, spans_from_phrases
 from qorgan.llm_tools import LLMResponseError, generate_json, is_transient, thinking_budget_for
 from qorgan.taxonomy import Taxonomy, get_taxonomy
 
@@ -160,6 +160,20 @@ def _build_label(payload: dict[str, Any], transcript: str, *, is_hard_negative: 
     except (KeyError, TypeError, ValueError) as exc:
         raise LabelingError(f"Labeling response missing/invalid 'risk': {payload!r}") from exc
     risk = max(0.0, min(1.0, risk))
+
+    if is_hard_negative:
+        # A hard negative is a legitimate call *by construction* -- `generate_hard_negative`
+        # forces risk 0.02, no tags and no spans. The labeller reads the transcript blind and
+        # on a real bank call that verifies an identity it returns risk 1.0 with tactic tags
+        # (observed on 32 of 50 English negatives, ADR D54). Accepting that would poison the
+        # very class the primary metric, FPR, is measured on. The label is by construction,
+        # so the model does not get a vote on it.
+        return Label(
+            risk=min(risk, HARD_NEGATIVE_RISK),
+            tactic_tags=(),
+            trigger_spans=(),
+            is_hard_negative=True,
+        )
 
     tags = _valid_tags(payload.get("tactic_tags") or [])
     spans = spans_from_phrases(payload.get("trigger_phrases") or [], transcript)

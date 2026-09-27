@@ -1,0 +1,14 @@
+# English-only generation config (ADR D54). The main `corpus.yaml` batch writes a single file,
+# so English is generated separately and merged into `data/synthetic/dialogues.jsonl` rather
+# than regenerating ru/kk/mixed (which would change every existing dialogue and every number).
+# Same knobs and the same per-language quota as the other three languages.
+
+version: 1
+seed: 42
+languages: ["en"]
+model_route: bulk
+dialogues_per_tactic: 8
+hard_negatives_per_category: 10
+min_utterances: 4
+max_utterances: 10
+output_path: data/synthetic/dialogues_en.jsonl
