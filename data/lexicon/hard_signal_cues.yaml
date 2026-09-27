@@ -26,8 +26,11 @@ cues:
     - "код из сообщения"  # ASR-normalized form ("сообщение" instead of "SMS/push")
     - "Назовите шесть цифр"
     - "шесть цифр из push"
+    - "код из СМС"  # Cyrillic acronym: what RU speakers write and Vosk actually decodes (ADR D51)
     - "SMS-тегі кодты айтыңыз"
     - "SMS тегі кодты айтыңыз"  # ASR form: the recogniser drops the suffix hyphen (PLAN A10)
+    - "СМС-тегі кодты айтыңыз"  # Cyrillic acronym, KK (same bug class; no corpus row exercises it yet)
+    - "СМС тегі кодты айтыңыз"  # Cyrillic acronym, KK, ASR form (no suffix hyphen)
     - "алты санды атаңыз"
   credentials_request:
     - "Назовите номер карты"

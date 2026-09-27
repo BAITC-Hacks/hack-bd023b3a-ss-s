@@ -1,8 +1,8 @@
 # Project Status & Handoff — Qorğan
 
-_Last updated: **2026-09-25**. Current-state doc for anyone picking the project up. Read this,
+_Last updated: **2026-09-27**. Current-state doc for anyone picking the project up. Read this,
 then `docs/PLAN_2026-09.md` (the post-verdict plan and what is open), `docs/DECISIONS.md`
-(ADRs D11–D49), `docs/eval_report.md` (numbers, with intervals). The July sprint log below is
+(ADRs D11–D51), `docs/eval_report.md` (numbers, with intervals). The July sprint log below is
 kept as history._
 
 ## TL;DR (September 2026)
@@ -18,13 +18,13 @@ kept as history._
   everywhere, `python -m qorgan.reports.purge` applies retention.
 - **Model:** e5-base int8 embeddings (same graph server + device, one text per run) ⊕ 6
   interpretable features → calibrated LR; **threshold 0.59**. Retrained 2026-09-18 with 20
-  legit-style scam paraphrases + 45 institutional-register legit negatives (ADR D27; uncommitted). With the A6 meter (ADR D29) every stated gate held on the server's ORT 1.27; **restated on the device's own embeddings 2026-09-21 (ADRs D32/D33)**: test 0.000 / 0.953 · authored 0.000 / 0.889 · ood 0.000 / 0.886 (corpus repaired, ADR D34), styled FPR 0 everywhere, streaming authored 3/24 (one transient latch over the A6 gate, an inspected anchor) & 15/18, browser gate 0/200. Eval
+  legit-style scam paraphrases + 45 institutional-register legit negatives (ADR D27). With the A6 meter (ADR D29) every stated gate held on the server's ORT 1.27; **restated on the device's own embeddings 2026-09-21 (ADRs D32/D33)**: test 0.000 / 0.953 · authored 0.000 / 0.889 · ood 0.000 / 0.886 (corpus repaired, ADR D34), styled FPR 0 everywhere, streaming authored 3/24 (one transient latch over the A6 gate, an inspected anchor) & 15/18, browser gate 0/200. Eval
   @0.59: test FPR 0.000 [0, 0.068] / recall **0.953** · authored_heldout 0.000 [0, 0.142] /
   1.000 (clean subset n=19 negatives → [0, 0.176]) · ood 0.000 [0, 0.048] / 0.844 ·
   adversarial cue-free 0.927 · adversarial_legit 0.826 (was 0.651).
   **`authored_heldout` is hand-written, not real calls** — the locked real-call set (PLAN A3)
   does not exist yet; that is the biggest open item.
-- **The honest headline (2026-09-21, ADR D35):** on `shift` — 66 calls written by a *second
+- **Superseded by the D42 bullet below; kept as the baseline — (2026-09-21, ADR D35):** on `shift` — 66 calls written by a *second
   generator* (Claude, no sight of corpus / prompts / lexicons; `python -m qorgan.data.shift_set`)
   — the same model has **recall 0.242 [0.111, 0.423] (8 / 33), FPR 0.030**; ru 0.455 · kk 0.182 ·
   mixed 0.091. Every other split shares its generator with train. The cue lexicon fires on 6 / 33,
@@ -76,7 +76,42 @@ kept as history._
   calls with call content: `POST /api/reports`, `DELETE /api/reports/{receipt}`. Model load
   ~3 s from localhost, ~0.6 s first inference (WASM/WebGPU).
 
-## 2026-09-25 — fresh-clone recheck + first improvement loop (branch `dev/loop`, uncommitted)
+## 2026-09-27 — publish gate repaired (D50); the Cyrillic-«СМС» cue gap closed (D51)
+
+- **The one failing test was a real, published defect.** `ood.jsonl`
+  `ood_neg_legit_gov_service_ru_1` carried an unscrubbed fabricated IIN — and so did the live
+  Hub copy (legal gap **M11**). D45 shipped the gate without a repair, so
+  `publish_guard.scrub_file` + `python -m qorgan.data.publish_guard [--fix]` now establish the
+  invariant the gate checks; `hf_upload.py`'s refusal names the command.
+- **Cost: none.** The row moves 0.0324 → 0.0391 against a 0.59 threshold; `ood` recall **0.932**
+  unchanged, and the split's one proxy FP is the pre-existing `ood_neg_legit_bank_call_mixed_3`
+  (D31), not this row. One line of `ood.jsonl` changed.
+- **Suite is green for the first time since the pull:** `pytest` **1241 passed / 2 skipped**
+  (was 1234 / 1 failed), `npm test` 60/60.
+- **Legal gap M2 is closed by D49** — verified in code: no client-settable `backend` on public
+  or admin routes, `/api/live/session/*` retired, and both serving paths pass
+  `use_cache=False`. The gap list in `LEGAL_ASSESSMENT.md` §6 predates D49 and still lists it.
+- **Open, needs sign-off:** the Hub copy is still the unscrubbed one — republishing is
+  outward-facing. M11 also wants a `LICENSE` + HF cards ("synthetic, no real persons").
+- **The OTP cue lexicon spelled SMS only in Latin (ADR D51).** Real Russian, and real Vosk
+  output, write «СМС»; `normalize()` keeps the scripts distinct, so the D39 matcher cannot
+  bridge it. 53 positive rows voiced «код из СМС» with **zero** OTP cues (46 train, 3 test,
+  2 val, 2 ood), and `secrecy_mixed_3#6` in `data/asr_capture/` lost its cue on otherwise
+  correct ASR. Added `"код из СМС"` + two Cyrillic KK forms; `"код из пуш"` measured +0/+0 and
+  was **not** added.
+- **Headline after the D51 retrain** (device backend, threshold 0.59): `test` FPR 0.000 /
+  recall **1.000** (was 0.984) · `authored_heldout` 0.000 / 0.889 · `ood` 0.000 / 0.932 ·
+  `shift` 0.061 / 0.364, `shift (clean)` 0.000 / 0.364. Streaming `test` alert-hit 62/64 →
+  **63/64**, `authored` false-latch 3/24 → **2/24**, alert-hit 15/18 → **16/18**.
+- **Cost, on record:** ASR-styled `ood` FPR 0.000 → **0.014** — `ood_neg_legit_bank_call_mixed_3`
+  (clean 0.132 → styled 0.612). No cue fires on that row at all, so the **joint-LR refit** moved
+  it, not the new cues; not fixed with data because it is an eval-split row. Now in the
+  inspection ledger, so `ood (clean)` is reported beside the full row. Rollback:
+  `models/linear_d50_rollback`.
+- **Known gap, not bundled:** `reg_neg_reassure_legit_bank_call_ru_72` reads as textbook
+  reassurance («Мы никогда не спросим…») but does not trip the reassurance lexicon.
+
+## 2026-09-25/26 — fresh-clone recheck + first improvement loop (branch `dev/loop`, committed as `0104ccd`)
 - **Fresh clone was not self-deployable:** `deploy_bootstrap.py` probed/retrained the model
   before downloading the int8 embedder it needs → ONNX `NO_SUCHFILE`, and the Docker build
   runs the same script. Fixed: `ensure_embedder` runs first, head weights are copied after the
@@ -204,11 +239,11 @@ accept numbered reports), `QORGAN_REPORT_RETENTION_DAYS=180`.
 - **Novelty needs support (C10, ADR D21):** a number-less single report can no longer create a "novel scheme" callout (29 false flags under number rotation → 1); two such reports, or one with a number, still can. `python -m qorgan.eval.cluster` is the regression check.
 - **Adversarial (A9/A9b, ADRs D22/D27):** cue-free paraphrases cost nothing (0.927); the legit-sounding adversary dropped recall to 0.651 → addressed with paired train data (20 legit-style scams + 45 institutional-register legit negatives): 0.826 with every FPR gate held — the one hairline streaming latch it introduced is removed by the A6 meter (see eval report). Price: the two RU legit anchors moved from ~0.31 to ~0.45 (still clear). Only real calls (A3) can confirm the knee.
 - **Cross-runtime parity (ADR D28):** measured on 200 transcripts, the int8 runtime residual is ~1 % decision flips (shipped model 1.5 %), |Δrisk| p95 0.10 / max 0.27; the gate now asserts ≥ 99 % same decision. The old "0 flips / 28" was the small set.
-- **A6 meter (ADR D29, uncommitted):** the latch arms from the third utterance unless a hard signal fired (`QORGAN_METER_MIN_TURNS_TO_ARM=3`; damping knob `QORGAN_METER_SHORT_WINDOW_TURNS`, off). With the retrained heads: authored false-latch 2/24, alert-hit 16/18, median turns-to-alert 3 (+1). The demo scam scene latches on its third line.
-- **Per-tactic thresholds (ADR D30, uncommitted):** the tactic head over-predicted (2.86 tags per test dialogue vs 1.91 true); each tactic now has its own cut, tuned by max-F1 over 0.50–0.70 on out-of-fold train + val at training time (`multilabel.out_of_fold_proba`, `calibrate.tune_tactic_thresholds`; < 8 tuning positives keeps 0.5). End-to-end: test micro-F1 0.733 → 0.770 (P 0.61 → 0.76), tags/dialogue 1.98; ood 0.396 → 0.496; authored within noise; `urgency` / `verification_ploy` lose test recall (their 208 / 160 tuning positives disagree with test's 43 / 29 — on record, not tuned away). Risk head byte-identical, so no FPR gate moves; JS decodes 1:1 (fixtures regenerated).
-- **ASR realism (A10, ADR D31, uncommitted):** `python -m qorgan.eval.asr_realism [--drop-latin]` scores every eval dialogue clean and ASR-styled (`data/asr_style.py`: lowercase, no punctuation, numerals → words via `num2words`), paired, FPR first. Under the device-faithful runtime the register alone cost test FPR 5/52 on clean-trained heads → `build_corpus` adds an ASR-styled copy of every train row (`QORGAN_ASR_STYLE_TRAIN_FRACTION=1.0`; train 711 → 1,422; generated at build) and the two hyphenated KK cues have ASR forms. Same runtime before → after: styled test FPR 5/52 → 0, streaming test false-latch 5/52 → 3/52, adversarial-legit 0.872; costs: one server-side ood FP (`ood_neg_legit_bank_call_mixed_3`, 0.67 server / 0.15 browser) and a third transient authored latch (`real_neg_bank_fraud_alert_ru`, inspected anchor). Rollbacks: `models/linear_d30` (needs the pre-D31 lexicon — it hash-checks — and was trained on ORT 1.27).
-- **Runtime truth (ADR D32, uncommitted):** the browser's **WebGPU** path was broken for the int8 graph (cosine 0.78 to the server, slower than WASM) → `embed-worker.js` is WASM-only. The D17/D18/D28 "runtime residual" was an **ONNX Runtime version gap** (Python 1.27 vs onnxruntime-node 1.21): `onnxruntime==1.21.*` is pinned (`tests/test_runtime_pin.py`), Node is now bit-identical, and `npm test` drops from ~30 min to minutes. The browser (onnxruntime-web 1.22-dev, WASM) is a third build at cosine 0.982 / min 0.949: the runtime gate is `tests_js/integration/browser_gate.test.mjs` on `tests_js/fixtures/runtime_gate_browser.f32`, captured by `npm run gate:browser` (Playwright dev dependency, `npx playwright install chromium` once), asserted at the measured level (≥ 97 %, p95 < 0.15, Jaccard ≥ 0.9; 5/200 flips on both the old and the new heads). **Headline under the pinned runtime:** test 0.019 [0.000, 0.103] / 0.953 · authored 0.000 [0.000, 0.142] / 0.944 · ood 0.013 [0.000, 0.072] / 0.867 — the earlier "0.000 everywhere" was the server's 1.27 kernels. Follow-up **B10**: train/eval on device embeddings.
-- **Device embeddings (B10, ADR D33, uncommitted):** `QORGAN_EMBED_BACKEND=device` (`classifier/device_embed.py`) posts texts to `npm run device:serve` — the site's real `embed-worker.js` in headless Chromium (Playwright; `--pages 4` ≈ 0.1 s/text; sqlite cache `data/cache/device_embeddings.sqlite` keyed by model + browser build + text). The shipped heads are trained and every eval table computed with it; `metadata.json::embed_backend = device`; the server's `onnx` backend loads them as the documented proxy (`linear_train._PROXY_BACKENDS`). **Headline, on the device (corpus repaired, ADR D34):** test 0.000 [0.000, 0.070] / 0.953 (n=115) · authored 0.000 [0.000, 0.142] / 0.889 (16/18: `customs_ru` 0.515, `prize_phone_kk` 0.514) · ood 0.000 [0.000, 0.049] / 0.886 (n=118) · styled FPR 0 on every split · cue-free adversarial 0.917, legit-sounding 0.815 · streaming test 3/51 & 62/64, authored 3/24 & 15/18 — with the inspection ledger applied (`eval.stream` reports `(clean)`/`(inspected)` rows now): clean 1/19 [0.001, 0.260], inspected 2/5 · **browser gate 0/200, |Δrisk| 0.000, Jaccard 1.000**. The previously shipped heads decide the same on the device (their 1/52 and 1/75 FPs were the server runtime's). Server proxy vs device: 6/200, p95 0.114 — reported, not gated. Retrain needs the bridge running; the cache makes reruns free. Rollbacks (gitignored): `models/linear_d32` (native-1.21-trained), `linear_d30` (1.27, pre-D31 lexicon).
+- **A6 meter (ADR D29):** the latch arms from the third utterance unless a hard signal fired (`QORGAN_METER_MIN_TURNS_TO_ARM=3`; damping knob `QORGAN_METER_SHORT_WINDOW_TURNS`, off). With the retrained heads: authored false-latch 2/24, alert-hit 16/18, median turns-to-alert 3 (+1). The demo scam scene latches on its third line.
+- **Per-tactic thresholds (ADR D30):** the tactic head over-predicted (2.86 tags per test dialogue vs 1.91 true); each tactic now has its own cut, tuned by max-F1 over 0.50–0.70 on out-of-fold train + val at training time (`multilabel.out_of_fold_proba`, `calibrate.tune_tactic_thresholds`; < 8 tuning positives keeps 0.5). End-to-end: test micro-F1 0.733 → 0.770 (P 0.61 → 0.76), tags/dialogue 1.98; ood 0.396 → 0.496; authored within noise; `urgency` / `verification_ploy` lose test recall (their 208 / 160 tuning positives disagree with test's 43 / 29 — on record, not tuned away). Risk head byte-identical, so no FPR gate moves; JS decodes 1:1 (fixtures regenerated).
+- **ASR realism (A10, ADR D31):** `python -m qorgan.eval.asr_realism [--drop-latin]` scores every eval dialogue clean and ASR-styled (`data/asr_style.py`: lowercase, no punctuation, numerals → words via `num2words`), paired, FPR first. Under the device-faithful runtime the register alone cost test FPR 5/52 on clean-trained heads → `build_corpus` adds an ASR-styled copy of every train row (`QORGAN_ASR_STYLE_TRAIN_FRACTION=1.0`; train 711 → 1,422; generated at build) and the two hyphenated KK cues have ASR forms. Same runtime before → after: styled test FPR 5/52 → 0, streaming test false-latch 5/52 → 3/52, adversarial-legit 0.872; costs: one server-side ood FP (`ood_neg_legit_bank_call_mixed_3`, 0.67 server / 0.15 browser) and a third transient authored latch (`real_neg_bank_fraud_alert_ru`, inspected anchor). Rollbacks: `models/linear_d30` (needs the pre-D31 lexicon — it hash-checks — and was trained on ORT 1.27).
+- **Runtime truth (ADR D32):** the browser's **WebGPU** path was broken for the int8 graph (cosine 0.78 to the server, slower than WASM) → `embed-worker.js` is WASM-only. The D17/D18/D28 "runtime residual" was an **ONNX Runtime version gap** (Python 1.27 vs onnxruntime-node 1.21): `onnxruntime==1.21.*` is pinned (`tests/test_runtime_pin.py`), Node is now bit-identical, and `npm test` drops from ~30 min to minutes. The browser (onnxruntime-web 1.22-dev, WASM) is a third build at cosine 0.982 / min 0.949: the runtime gate is `tests_js/integration/browser_gate.test.mjs` on `tests_js/fixtures/runtime_gate_browser.f32`, captured by `npm run gate:browser` (Playwright dev dependency, `npx playwright install chromium` once), asserted at the measured level (≥ 97 %, p95 < 0.15, Jaccard ≥ 0.9; 5/200 flips on both the old and the new heads). **Headline under the pinned runtime:** test 0.019 [0.000, 0.103] / 0.953 · authored 0.000 [0.000, 0.142] / 0.944 · ood 0.013 [0.000, 0.072] / 0.867 — the earlier "0.000 everywhere" was the server's 1.27 kernels. Follow-up **B10**: train/eval on device embeddings.
+- **Device embeddings (B10, ADR D33):** `QORGAN_EMBED_BACKEND=device` (`classifier/device_embed.py`) posts texts to `npm run device:serve` — the site's real `embed-worker.js` in headless Chromium (Playwright; `--pages 4` ≈ 0.1 s/text; sqlite cache `data/cache/device_embeddings.sqlite` keyed by model + browser build + text). The shipped heads are trained and every eval table computed with it; `metadata.json::embed_backend = device`; the server's `onnx` backend loads them as the documented proxy (`linear_train._PROXY_BACKENDS`). **Headline, on the device (corpus repaired, ADR D34):** test 0.000 [0.000, 0.070] / 0.953 (n=115) · authored 0.000 [0.000, 0.142] / 0.889 (16/18: `customs_ru` 0.515, `prize_phone_kk` 0.514) · ood 0.000 [0.000, 0.049] / 0.886 (n=118) · styled FPR 0 on every split · cue-free adversarial 0.917, legit-sounding 0.815 · streaming test 3/51 & 62/64, authored 3/24 & 15/18 — with the inspection ledger applied (`eval.stream` reports `(clean)`/`(inspected)` rows now): clean 1/19 [0.001, 0.260], inspected 2/5 · **browser gate 0/200, |Δrisk| 0.000, Jaccard 1.000**. The previously shipped heads decide the same on the device (their 1/52 and 1/75 FPs were the server runtime's). Server proxy vs device: 6/200, p95 0.114 — reported, not gated. Retrain needs the bridge running; the cache makes reruns free. Rollbacks (gitignored): `models/linear_d32` (native-1.21-trained), `linear_d30` (1.27, pre-D31 lexicon).
 - **Streamlit `app/`:** kept on purpose (D4, decided 2026-09-21) as the easily-run local demo / dev harness — `streamlit run app/streamlit_app.py`, degrades to the `mock` backend without a model. Not a gate, not the deployed product: it scores in the server process and its mic mode sends audio to wherever Streamlit runs.
 - `models/linear_fp32/` (the fp32-trained heads) and `models/linear_embed_only/` are the local rollback bundles (gitignored); `models/xlmr/` and the e5-small experiment were deleted on 2026-09-14.
 

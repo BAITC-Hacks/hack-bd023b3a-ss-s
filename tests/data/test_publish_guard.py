@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from qorgan.data.publish_guard import PUBLISHED_SPLITS, find_unscrubbed
+from qorgan.data.publish_guard import PUBLISHED_SPLITS, find_unscrubbed, scrub_file
+from qorgan.data.schema import SCAM_RISK_THRESHOLD, Dialogue, Label, Utterance, spans_from_phrases
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -56,3 +57,64 @@ def test_local_published_splits_are_scrubbed():
     if not any(p.exists() for p in paths[: len(PUBLISHED_SPLITS)]):
         pytest.skip("no local corpus (run scripts/deploy_bootstrap.py)")
     assert find_unscrubbed(paths) == []
+
+
+# --- scrub_file: the repair that establishes the gate's invariant (ADR D45 / legal gap M11) ---
+
+
+def _full(did: str, *texts: str, risk: float = 0.0, phrases: tuple[str, ...] = ()) -> dict:
+    """A complete, schema-valid dialogue row as a dict (the shape the published splits hold)."""
+    utterances = tuple(Utterance(speaker="caller", text=t) for t in texts)
+    transcript = "\n".join(u.text for u in utterances)
+    label = Label(
+        risk=risk,
+        trigger_spans=spans_from_phrases(list(phrases), transcript),
+        is_hard_negative=risk < SCAM_RISK_THRESHOLD,
+    )
+    return Dialogue(id=did, language="ru", utterances=utterances, label=label).model_dump(mode="json")
+
+
+def test_scrub_file_makes_the_file_a_fixed_point(tmp_path):
+    path = _write(tmp_path / "ood.jsonl", [
+        _full("clean", "всё чисто"),
+        _full("leak", "это ИИН 770808300300?", "и карта 4400123456789010"),
+    ])
+    scrub_file(path)
+    assert find_unscrubbed([path]) == []
+
+
+def test_scrub_file_returns_what_it_fixed(tmp_path):
+    path = _write(tmp_path / "ood.jsonl", [_full("clean", "всё чисто"), _full("leak", "ИИН 770808300300?")])
+    fixed = scrub_file(path)
+    assert [(f.file, f.dialogue_id, f.utterance_index) for f in fixed] == [("ood.jsonl", "leak", 0)]
+    assert "770808300300" not in repr(fixed)  # a repair must not print what it redacted
+
+
+def test_scrub_file_leaves_an_already_clean_file_byte_identical(tmp_path):
+    path = _write(tmp_path / "ood.jsonl", [_full("a", "Позвоните в [PHONE]"), _full("b", "Код 123456 никому")])
+    before = path.read_bytes()
+    assert scrub_file(path) == []
+    assert path.read_bytes() == before
+
+
+def test_scrub_file_drops_a_trigger_span_that_was_itself_pii(tmp_path):
+    path = _write(tmp_path / "shift.jsonl", [
+        _full("scam", "Продиктуйте ИИН 770808300300 сейчас", risk=0.9, phrases=("770808300300",)),
+    ])
+    assert json.loads(path.read_text(encoding="utf-8"))["label"]["trigger_spans"], "fixture needs a span"
+    scrub_file(path)
+    row = json.loads(path.read_text(encoding="utf-8"))
+    assert row["label"]["trigger_spans"] == []  # dangling span dropped, never left pointing at [IIN]
+    Dialogue.model_validate(row)  # still schema-valid (verbatim-span invariant holds)
+
+
+def test_scrub_file_is_idempotent(tmp_path):
+    path = _write(tmp_path / "ood.jsonl", [_full("leak", "ИИН 770808300300?")])
+    scrub_file(path)
+    once = path.read_bytes()
+    assert scrub_file(path) == []
+    assert path.read_bytes() == once
+
+
+def test_scrub_file_skips_a_missing_file(tmp_path):
+    assert scrub_file(tmp_path / "absent.jsonl") == []

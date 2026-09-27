@@ -1008,3 +1008,109 @@ can carry a number) — the top open privacy item; it needs Python + JS parity a
 measurement before it can change what the model trained on. The audit/access-log retention
 period is a legal decision (LEGAL_ASSESSMENT §6). The Streamlit harness still stores reports
 without a consent version (dev tool, D4).
+
+### D50 — The publish gate gains its repair; the Hub's unscrubbed IIN is fixed (2026-09-27)
+D45 made the invariant explicit — every published utterance must already be a `scrub_text`
+fixed point — but shipped only the *gate*. There was no tool to establish it: `hf_upload.py`
+refused the upload and named a **function** (`build_corpus.scrub_dialogue`), leaving the
+operator to hand-edit a split, which is how the row got published in the first place. Finding
+without fixing is half an invariant.
+
+**The row.** `ood.jsonl`, `ood_neg_legit_gov_service_ru_1`, utterance 1: a legitimate
+ЦОН/eGov caller reads back a fabricated 12-digit IIN (`is_hard_negative`, risk 0.02) — the
+exact file the guard's own docstring names. It is also the live public copy on the Hub, so
+legal gap **M11** was real and not merely local. `ood.jsonl` is a July artifact with no live
+producer (repaired by hand per D34), so there is no generator to correct: the data plus the
+gate *is* the complete remediation.
+
+**The repair.** `publish_guard.scrub_file(path)` reuses `build_corpus.scrub_dialogue`, so
+trigger spans are re-grounded and a span that *was* the PII is dropped rather than left
+pointing at `[IIN]` (the schema's verbatim invariant). It leaves a file that is already a fixed
+point completely untouched — no rewrite, so a clean corpus never churns and the call is
+idempotent — and raises on a line that is not a valid `Dialogue`, because a split we cannot
+parse is one we must not silently publish. `python -m qorgan.data.publish_guard` reports and
+exits non-zero; `--fix` repairs. `hf_upload.py`'s refusal now names that command.
+
+**Measured cost: none.** The repaired utterance moves the dialogue from 0.0324 to 0.0391 on the
+onnx proxy against a 0.59 threshold, so it cannot change a decision. Split-level `ood` after
+the fix: recall **0.932** (unchanged), FPR 0.014 [0.000, 0.073] — and the single false positive
+is `ood_neg_legit_bank_call_mixed_3` at 0.714, the pre-existing server-proxy artifact already
+recorded in D31 (0.67 server / 0.15 browser), not this row. Exactly one line of `ood.jsonl`
+changed; the other 117 are byte-identical. Numbers are the onnx proxy, not the device backend
+the headline uses — the device restatement needs `npm run device:serve` and is not required
+here, since the decision margin is ~0.55.
+
+**Still open.** The Hub copy is unchanged: republishing is outward-facing and needs sign-off,
+and M11 also asks for a `LICENSE` plus HF cards stating "synthetic, no real persons". Until
+then the guard keeps the local corpus honest and blocks any upload.
+
+**Evidence.** Six new tests in `tests/data/test_publish_guard.py` (fixed point, reported
+findings, no-churn, span dropped, idempotent, missing file), written before the implementation;
+`pytest` **1241 passed / 2 skipped** (was 1234 / 1 failed / 2 skipped); `npm test` 60/60.
+
+### D51 — The OTP cue lexicon spelled SMS only in Latin; real Russian and real ASR write «СМС» (2026-09-27)
+Found while probing the shipped lexicon against real-world Russian scam phrasing (the external
+dataset survey, `docs/DATA_SOURCES.md`): the single most canonical real OTP-phishing line,
+«Продиктуйте код из СМС», matched **nothing**. Every SMS cue was Latin-spelled
+(`"код из SMS"`, `"SMS-тегі кодты айтыңыз"`), and `normalize()` correctly keeps the scripts
+distinct (`кодизсмс` ≠ `кодизsms`), so the D39 bounded-edit matcher cannot bridge it — a script
+change is not an edit-distance problem.
+
+**Rejected alternative.** Folding Latin↔Cyrillic homoglyphs inside `normalize()` would have
+invalidated `MATCHER_VERSION` and therefore every trained cue feature, and it would not even
+work: `SMS` → `СМС` is *acronym transliteration*, while homoglyph folding maps Cyrillic `С` to
+Latin `C`, not `S`. A lexicon variant is the honest fix, and the file already has a documented
+slot for it (`# ASR form`).
+
+**Live, not hypothetical.** In `data/asr_capture/`, `secrecy_mixed_3#6` was decoded correctly by
+Vosk except for the script — «код из смс» — and lost its `otp_request` cue, so the 61/81
+hard-signal floor never armed. Corpus-wide, **53 positive rows** voiced a request-shaped
+«код из СМС» while firing zero OTP cues (46 `train`, 3 `test`, 2 `val`, 2 `ood`).
+
+**The change, measured per candidate.** `"код из СМС"`: +36 positives, +6 negative rows (3 unique
+dialogues plus their ASR-styled copies). `"код из пуш"` / `"код из пуш-уведомления"`: **+0 / +0**,
+so not added — the same bug class with no instances is not worth the surface. The two Cyrillic
+**KK** forms also gain +0 today and were added anyway, deliberately: the cue flag is per *tactic*,
+not per phrase, so the `otp_request` weight is already learned from the Latin-form rows and
+widening what sets the flag has no training-time effect, while closing the identical bug for
+Kazakh ASR output. That is reasoning, not measurement — on record as such.
+
+**Why the 6 negative hits are acceptable.** All are reassurance rows where the sentence is a
+negation («Мы никогда не спросим у вас ПИН-код, CVV или код из СМС»). Cue-hits on legit calls are
+already the status quo, not a new class: **8 of 1,136** negatives fire existing cues (e.g.
+«SMS кодтарын ешкімге айтпаңыз»), and only 4 of those 8 carry the reassurance counter-signal;
+2 of the 3 new ones do. Separately noted: `reg_neg_reassure_legit_bank_call_ru_72` reads as
+textbook reassurance but does not trip the reassurance lexicon — a gap to fix on its own, not
+bundled here, so a gate movement stays attributable.
+
+**No new training data was added**, because the 38 rows that gain the cue are existing positives
+whose feature was silently zero. That makes this the lexicon-only shape the July sprint lesson
+warns about, and the predicted symptom duly appeared (below).
+
+**Results** (device backend, threshold 0.59, ADR D33 methodology):
+`test` FPR 0.000 / recall **0.984 → 1.000** · `authored_heldout` 0.000 / 0.889 held ·
+`ood` 0.000 / 0.932 held · `shift` 0.061 / 0.364 and `shift (clean)` 0.000 / 0.364 held.
+Streaming: `test` false-latch 3/51 held and alert-hit **62/64 → 63/64**; `authored` false-latch
+**3/24 → 2/24**, clean 1/19 held, alert-hit **15/18 → 16/18**. The three `test` positives that
+were losing the hard signal are exactly the ones recovered.
+
+**Cost, on record.** ASR-styled `ood` FPR **0.000 → 0.014** (1/74): `ood_neg_legit_bank_call_mixed_3`,
+clean 0.132 → styled 0.612. **No cue fires on that row at all** — clean or styled, old lexicon or
+new — so the joint-LR refit moved it, precisely the effect the July lesson describes. It is not
+fixed with data, because it is an eval-split row and targeting it would be tuning on held-out
+data. It is also the row D31 already recorded as the corpus's weakest negative (0.67 server /
+0.15 browser); it is now in the inspection ledger, so the split reports `ood (clean)` beside the
+full row. Styled `test` and `authored` FPR stay 0.000, and cue/reassurance survival is 11/11,
+13/13, 10/10 and 5/5, 9/9, 6/6.
+
+**Ledger.** Two `ood` rows were read during this work and are recorded (ADR D43 treatment):
+`ood_neg_legit_gov_service_ru_1` (read only to repair the published IIN, D50) and
+`ood_neg_legit_bank_call_mixed_3` (read to attribute the movement above).
+
+**Rollback.** `models/linear_d50_rollback` (device-trained, pre-D51 lexicon; it hash-checks the
+lexicon, so it must be restored together with the old YAML).
+
+**Evidence.** `pytest` **1241 passed / 2 skipped**; `npm test` **60/60**; `weights.json`, the
+parity, runtime-gate and scrub fixtures regenerated; corpus rebuilt with an unchanged
+`content_hash` (the lexicon does not alter corpus content).
+

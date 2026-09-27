@@ -1352,3 +1352,72 @@ two are the hardest negatives in the split by construction — but it does mean 
 negatives to remove `shift_legit_kk_11`. The premise was measured first and is false —
 sales-flavoured calls are already 183 of 459 (40 %) of train negatives — so it would have been
 fitting to one named evaluation row rather than filling a gap.
+
+## Addendum (2026-09-27) — the Latin-only SMS cue (ADR D51), and the published IIN (ADR D50)
+
+Pasted from harness output. Device backend (`QORGAN_EMBED_BACKEND=device`, ADR D33),
+`backend=linear`, threshold 0.59.
+
+Every SMS cue in the lexicon was Latin-spelled, while real Russian — and real Vosk output —
+writes «СМС». `normalize()` keeps the scripts distinct, so the D39 bounded-edit matcher cannot
+bridge it. **53 positive corpus rows** voiced a request-shaped «код из СМС» while firing zero
+`otp_request` cues (46 `train`, 3 `test`, 2 `val`, 2 `ood`). Added `"код из СМС"` plus the two
+Cyrillic KK forms; `"код из пуш"` measured **+0 positives / +0 negatives** and was not added.
+
+### Clean text
+
+| Split | FPR [95% CI] | Precision | Recall [95% CI] | F1 | PR-AUC [95% CI] | N |
+|---|---|---|---|---|---|---|
+| test | 0.000 [0.000, 0.070] | 1.000 | 1.000 [0.944, 1.000] | 1.000 | 1.000 [1.000, 1.000] | 115 |
+| authored_heldout | 0.000 [0.000, 0.142] | 1.000 | 0.889 [0.653, 0.986] | 0.941 | 0.997 [0.982, 1.000] | 42 |
+| authored_heldout (clean) | 0.000 [0.000, 0.176] | 1.000 | 0.889 [0.653, 0.986] | 0.941 | 1.000 [1.000, 1.000] | 37 |
+| ood | 0.000 [0.000, 0.049] | 1.000 | 0.932 [0.813, 0.986] | 0.965 | 0.995 [0.981, 1.000] | 118 |
+| ood (clean) | 0.000 [0.000, 0.050] | 1.000 | 0.932 [0.813, 0.986] | 0.965 | 0.995 [0.983, 1.000] | 116 |
+| shift | 0.061 [0.007, 0.202] | 0.857 | 0.364 [0.204, 0.549] | 0.511 | 0.899 [0.803, 0.970] | 66 |
+| shift (clean) | 0.000 [0.000, 0.112] | 1.000 | 0.364 [0.204, 0.549] | 0.533 | 0.947 [0.888, 0.985] | 64 |
+
+`test` recall **0.984 → 1.000**; the three recovered positives are exactly the ones that had been
+losing the hard signal. `authored_heldout`, `ood` and `shift` are unchanged. `test` by language:
+FPR 0.000 and recall 1.000 in all of kk (n=39), mixed (n=39) and ru (n=37).
+
+### Streaming (`eval.stream`)
+
+| Split | False-Latch [95% CI] | Alert-Hit [95% CI] | Median Turns | N+ | N- |
+|---|---|---|---|---|---|
+| test | 0.059 [0.012, 0.162] | 0.984 [0.916, 1.000] | 3.000 | 64 | 51 |
+| authored_heldout | 0.083 [0.010, 0.270] | 0.889 [0.653, 0.986] | 3.000 | 18 | 24 |
+| authored_heldout (clean) | 0.053 [0.001, 0.260] | 0.889 [0.653, 0.986] | 3.000 | 18 | 19 |
+
+`test` alert-hit 62/64 → **63/64** with the false-latch rate unchanged at 3/51; `authored`
+false-latch **3/24 → 2/24** (clean 1/19 unchanged) and alert-hit **15/18 → 16/18**.
+
+### ASR-styled (`eval.asr_realism`) — where the cost is
+
+| Split | Text | FPR [95% CI] | Recall [95% CI] | Flips → alert / → clear | Cues kept | Reassurance kept |
+|---|---|---|---|---|---|---|
+| test | clean | 0.000 [0.000, 0.070] | 1.000 [0.944, 1.000] | - | 11 | 5 |
+| test | styled | 0.000 [0.000, 0.070] | 0.984 [0.916, 1.000] | 0 / 1 | 11/11 | 5/5 |
+| authored_heldout | clean | 0.000 [0.000, 0.142] | 0.889 [0.653, 0.986] | - | 13 | 9 |
+| authored_heldout | styled | 0.000 [0.000, 0.142] | 0.944 [0.727, 0.999] | 0 / 1 | 13/13 | 9/9 |
+| ood | clean | 0.000 [0.000, 0.049] | 0.932 [0.813, 0.986] | - | 10 | 6 |
+| ood | styled | 0.014 [0.000, 0.073] | 0.886 [0.754, 0.962] | 1 / 2 | 10/10 | 6/6 |
+
+**The one regression, and its real cause.** Styled `ood` FPR 0.000 → 0.014 is
+`ood_neg_legit_bank_call_mixed_3` (clean 0.132 → styled 0.612). **No cue fires on that row at
+all** — clean or styled, old lexicon or new — so the **joint-LR refit** moved it, not the new
+cues. This is the effect the July sprint lesson names: a lexicon edit without paired training
+data moves unrelated rows. Here no data could honestly be added, because the row is in an
+evaluation split and targeting it would be tuning on held-out data. It is also the row D31
+already recorded as the corpus's weakest negative (0.67 server / 0.15 browser). It is now in the
+inspection ledger, so `ood (clean)` is reported beside the full row — that is disclosure, not a
+fix. Styled `test` and `authored_heldout` FPR remain 0.000 and every cue and reassurance signal
+survives styling.
+
+### The published IIN (ADR D50)
+
+`ood_neg_legit_gov_service_ru_1` utterance 1 held an unscrubbed fabricated IIN, in the local
+corpus **and in the live Hub copy** (legal gap M11). Repaired with
+`python -m qorgan.data.publish_guard --fix`. The row moves 0.0324 → 0.0391 against a 0.59
+threshold, so it cannot change a decision, and one line of `ood.jsonl` changed. The Hub copy is
+still unrepaired: publishing is outward-facing and waits for sign-off, bundled with this model.
+
