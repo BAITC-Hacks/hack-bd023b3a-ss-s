@@ -135,3 +135,48 @@ def test_label_corpus_labels_all_and_counts_calls():
     assert len(relabeled) == 2
     assert [d.id for d in relabeled] == ["d1", "d2"]
     assert len(client.models.calls) == 2
+
+
+# --- resilience: labelling is another few-hundred-call run (ADR D53) -----------------------
+
+
+_LABEL_PAYLOAD = {"risk": 0.95, "tactic_tags": [{"id": "otp_request", "weight": 0.9}], "trigger_phrases": []}
+
+
+class _Flaky:
+    """Fails `failures` times with a dropped connection, then answers."""
+
+    def __init__(self, failures: int, response):
+        self.remaining = failures
+        self._response = response
+        self.calls = 0
+        self.models = self
+
+    def generate_content(self, **_kwargs):
+        self.calls += 1
+        if self.remaining > 0:
+            self.remaining -= 1
+            raise ConnectionError("Connection reset by peer")
+        return self._response
+
+
+def test_label_dialogue_retries_a_dropped_connection():
+    client = _Flaky(2, _response(_LABEL_PAYLOAD))
+    labeled = label_dialogue(_dialogue(["Назовите код."]), client=client)
+    assert labeled.label.risk == 0.95
+    assert client.calls == 3
+
+
+def test_label_corpus_streams_and_skips_already_labeled():
+    """A crashed labelling run must resume, not start the whole corpus again."""
+    client = _Flaky(0, _response(_LABEL_PAYLOAD))
+    first = _dialogue(["Назовите код."])
+    second = first.model_copy(update={"id": "second"})
+    seen: list[str] = []
+
+    out = label_corpus([first, second], client=client, sink=lambda d: seen.append(d.id),
+                       skip_ids={first.id})
+
+    assert [d.id for d in out] == ["second"]
+    assert seen == ["second"]
+    assert client.calls == 1, "a skipped dialogue costs no API call"

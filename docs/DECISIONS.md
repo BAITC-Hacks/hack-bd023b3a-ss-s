@@ -1199,6 +1199,12 @@ end, the whole batch was lost a *second* time. Two fixes, both at the shared sea
 appends and flushes each dialogue as it is produced and re-running **resumes** from what is
 already on disk. A dropped connection now costs one dialogue, not a run.
 
+**`label.py` had the same two holes and was fixed before it could bite.** Labelling is the
+*next* few-hundred-call pass over the same seam: it had no retry at all (only `LLMResponseError`
+converted to `LabelingError`) and `main` wrote once at the end. It now retries transient
+failures and appends/resumes exactly as generation does. Fixing it pre-emptively rather than
+after a third lost run is the point of writing the failure down.
+
 **Evidence.** New `tests/test_llm_tools.py` (the seam had no tests at all): the deadline fires
 on a client that never answers and returns in well under 10 s, a normal call still returns,
 and an unparseable payload is still `LLMResponseError`. Plus two generation tests: a transient
