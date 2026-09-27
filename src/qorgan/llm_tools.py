@@ -12,12 +12,20 @@ The `client` is always injected by callers (a `google-genai`-style object exposi
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any
 
 
 # Per-request ceiling for build-time calls (ms): a hung connection must fail and be
 # retried by the caller, not stall a 100-call batch (seen 2026-09-17 on the paraphrase run).
 _HTTP_TIMEOUT_MS = 120_000
+
+# Wall-clock deadline per call, independent of the transport. httpx's read timeout measures
+# the gap *between bytes*, so a socket that stays ESTABLISHED while the server sends nothing
+# never trips it: ADR D38 observed 40-minute hangs that way in the evaluation, and a real
+# English generation run hung for 83 minutes at 0 % CPU with no output (ADR D53). The
+# classifier had its own deadline; putting one here covers the generate and label CLIs too.
+_CALL_DEADLINE_S = 180.0
 
 
 class LLMResponseError(RuntimeError):
@@ -62,6 +70,7 @@ def generate_json(
     system_instruction: str | None = None,
     max_output_tokens: int = 2048,
     thinking_budget: int | None = None,
+    deadline_s: float | None = None,
 ) -> dict[str, Any]:
     """Call Gemini for structured JSON output and return the parsed object.
 
@@ -70,6 +79,10 @@ def generate_json(
     `thinking_budget_for`) to stop 2.5-series "thinking" tokens from eating the output
     budget and truncating the JSON. Raises `LLMResponseError` if the response carries no
     parseable JSON object.
+
+    The call is abandoned after `deadline_s` wall-clock seconds (default `_CALL_DEADLINE_S`)
+    and `TimeoutError` is raised: the transport timeout alone cannot end a silent socket. The
+    worker thread is left to die with its socket -- it holds no state we keep.
     """
     config: dict[str, Any] = {
         "response_mime_type": "application/json",
@@ -82,7 +95,18 @@ def generate_json(
     if thinking_budget is not None:
         config["thinking_config"] = {"thinking_budget": thinking_budget}
 
-    response = client.models.generate_content(model=model, contents=prompt, config=config)
+    limit = _CALL_DEADLINE_S if deadline_s is None else deadline_s
+    # Not a `with` block: its __exit__ joins the worker, which is exactly the hang we are
+    # escaping. A thread blocked in a socket read cannot be cancelled -- it is abandoned and
+    # ends when its socket does, holding no state we keep.
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gemini-call")
+    future = pool.submit(client.models.generate_content, model=model, contents=prompt, config=config)
+    try:
+        response = future.result(timeout=limit)
+    except FutureTimeout as exc:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise TimeoutError(f"Gemini call exceeded the {limit:.0f} s deadline") from exc
+    pool.shutdown(wait=False)
     return parse_json_response(response)
 
 

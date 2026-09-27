@@ -16,6 +16,7 @@ mirrors the TeleAntiFraud-28k methodology referenced in `data/README.md`.
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -37,12 +38,21 @@ _MAX_TOKENS = 4096
 _SEED_POSITIVE_RISK = 0.9
 _SEED_HARD_NEGATIVE_RISK = 0.02
 
+# A corpus run is hundreds of calls; one transient failure must not discard the batch (D53).
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_S = 2.0
+
 _LANGUAGE_INSTRUCTIONS = {
     "ru": "Write the entire dialogue in Russian.",
     "kk": "Write the entire dialogue in Kazakh.",
     "mixed": (
         "Write the dialogue in natural Kazakh-Russian code-switched speech, as commonly "
         "spoken in everyday Kazakhstani phone calls."
+    ),
+    "en": (
+        "Write the entire dialogue in English, as spoken by an English-speaking resident of "
+        "Kazakhstan: local institutions and money (Kaspi, Halyk, eGov, tenge, IIN) stay local, "
+        "only the language is English."
     ),
 }
 
@@ -84,7 +94,7 @@ class CorpusConfig(BaseModel):
 
     version: int
     seed: int
-    languages: tuple[Literal["ru", "kk", "mixed"], ...]
+    languages: tuple[Literal["ru", "kk", "mixed", "en"], ...]
     model_route: Literal["quality", "bulk"]
     dialogues_per_tactic: int = Field(ge=0)
     hard_negatives_per_category: int = Field(ge=0)
@@ -302,18 +312,31 @@ def _resolve_model(cfg: CorpusConfig) -> str:
 
 
 def _call_tool(client: Any, prompt: str, cfg: CorpusConfig) -> dict[str, Any]:
+    """One structured-JSON call, retrying the failures that are worth retrying.
+
+    A corpus run is hundreds of calls, so a single slow socket or 5xx must not discard every
+    dialogue generated before it (ADR D53). `TimeoutError` comes from the shared wall-clock
+    deadline in `llm_tools`; `LLMResponseError` covers a truncated or unparseable payload,
+    which a fresh sample usually fixes. Exhausted retries raise `GenerationError` naming the
+    cause -- a short corpus must never pass silently.
+    """
     model = _resolve_model(cfg)
-    try:
-        return generate_json(
-            client,
-            model=model,
-            prompt=prompt,
-            response_schema=_RESPONSE_SCHEMA,
-            max_output_tokens=_MAX_TOKENS,
-            thinking_budget=thinking_budget_for(model),
-        )
-    except LLMResponseError as exc:
-        raise GenerationError(str(exc)) from exc
+    last: Exception | None = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            return generate_json(
+                client,
+                model=model,
+                prompt=prompt,
+                response_schema=_RESPONSE_SCHEMA,
+                max_output_tokens=_MAX_TOKENS,
+                thinking_budget=thinking_budget_for(model),
+            )
+        except (LLMResponseError, TimeoutError) as exc:
+            last = exc
+            if attempt + 1 < _MAX_ATTEMPTS:
+                time.sleep(_RETRY_BACKOFF_S * (attempt + 1))
+    raise GenerationError(f"gave up after {_MAX_ATTEMPTS} attempts: {last}") from last
 
 
 def _build_dialogue(

@@ -1162,3 +1162,39 @@ of the fallback notice. Verified visually in the browser: verdict band, all eigh
 and the advice render in English while the Russian call transcript stays Russian with its
 trigger spans highlighted.
 
+### D53 — The shared Gemini seam gets a wall-clock deadline; generation retries (2026-09-27)
+Adding English (D54) meant a first generation run since the CLIs were written, and it **hung
+for 83 minutes at 0 % CPU with an empty output file** before being killed. The cause was
+already written down in this repo: D38 hardened the *classifier's* client because "httpx's
+read timeout is the gap between bytes, so a socket that stays ESTABLISHED while the server
+sends nothing never trips it (observed: 40-minute hangs)". That fix lived in
+`classifier/llm_classifier.py`. The **generate and label CLIs go through the same
+`llm_tools.generate_json` and never got it** — they had only the 120 s transport timeout that
+D38 says is insufficient.
+
+**Fixed at the shared seam, not per caller.** `generate_json` now runs the SDK call on a worker
+and abandons it after `deadline_s` wall-clock seconds (default 180), raising `TimeoutError`.
+Deliberately *not* a `with ThreadPoolExecutor(...)` block: its `__exit__` joins the worker,
+which is precisely the hang being escaped — the first implementation passed its test only
+after 30 s for that reason. A thread blocked in a socket read cannot be cancelled, so it is
+abandoned and ends when its socket does; it holds no state we keep. Every caller is now
+covered, including `label.py`, which had the same exposure and no test.
+
+**A batch must survive one bad socket.** `generate._call_tool` retries `TimeoutError` and
+`LLMResponseError` (a truncated or unparseable payload — a fresh sample usually fixes it) up
+to 3 times with linear backoff, then raises `GenerationError` naming the cause. Before this, a
+single blip discarded every dialogue generated so far: `generate_batch` accumulates in memory
+and writes only at the end, so failure at call 169 of 170 lost all 169.
+
+**Verified, not assumed.** After the fix a live single call answered in **1.1 s**, so the
+83-minute stall was a genuine silent socket and not a broken key or endpoint.
+
+**Still open (not done here).** `generate_batch` writes once at the end; incremental
+persistence would make a long run resumable rather than merely retry-resilient.
+
+**Evidence.** New `tests/test_llm_tools.py` (the seam had no tests at all): the deadline fires
+on a client that never answers and returns in well under 10 s, a normal call still returns,
+and an unparseable payload is still `LLMResponseError`. Plus two generation tests: a transient
+failure is retried, and exhausted retries raise loudly rather than yielding a short corpus.
+`pytest` 1250 passed / 2 skipped.
+
