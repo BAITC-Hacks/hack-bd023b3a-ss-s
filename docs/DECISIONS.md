@@ -1189,8 +1189,15 @@ and writes only at the end, so failure at call 169 of 170 lost all 169.
 **Verified, not assumed.** After the fix a live single call answered in **1.1 s**, so the
 83-minute stall was a genuine silent socket and not a broken key or endpoint.
 
-**Still open (not done here).** `generate_batch` writes once at the end; incremental
-persistence would make a long run resumable rather than merely retry-resilient.
+**Then it happened again, differently.** The retry caught `TimeoutError` and
+`LLMResponseError` only, so the next run died on `httpx.ReadError: Connection reset by peer`
+after ~10 minutes — and because `generate_batch` accumulated in memory and wrote once at the
+end, the whole batch was lost a *second* time. Two fixes, both at the shared seam:
+`llm_tools.is_transient` (moved out of `llm_classifier`, which now delegates to it, so
+"transient" means one thing across the classifier and both CLIs) already covered
+`httpx.HTTPError`; and `generate_batch` gained a `sink` callback plus `skip_ids`, so the CLI
+appends and flushes each dialogue as it is produced and re-running **resumes** from what is
+already on disk. A dropped connection now costs one dialogue, not a run.
 
 **Evidence.** New `tests/test_llm_tools.py` (the seam had no tests at all): the deadline fires
 on a client that never answers and returns in well under 10 s, a normal call still returns,

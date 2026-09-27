@@ -27,6 +27,29 @@ _HTTP_TIMEOUT_MS = 120_000
 # classifier had its own deadline; putting one here covers the generate and label CLIs too.
 _CALL_DEADLINE_S = 180.0
 
+# Statuses worth another attempt; anything else is a real answer we should not paper over.
+RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Timeouts, connection drops and retryable HTTP statuses (the SDK's `APIError.code`).
+
+    Shared by the classifier and the generate/label CLIs so "transient" means one thing. A
+    dropped connection (`httpx.ReadError: Connection reset by peer`) is the case that ended a
+    170-call generation run mid-flight (ADR D53).
+    """
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    try:
+        import httpx
+
+        if isinstance(exc, httpx.HTTPError):
+            return True
+    except ImportError:  # pragma: no cover - httpx ships with the SDK
+        pass
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    return isinstance(code, int) and code in RETRYABLE_STATUS
+
 
 class LLMResponseError(RuntimeError):
     """Raised when a Gemini response cannot be parsed into the expected JSON object."""

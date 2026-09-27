@@ -340,3 +340,59 @@ def test_generate_dialogue_gives_up_loudly_after_repeated_failures():
 
     with pytest.raises(GenerationError):
         generate_dialogue("otp_request", "ru", client=client, cfg=cfg)
+
+
+def test_generate_batch_streams_each_dialogue_to_a_sink(tmp_path):
+    """A long run must persist as it goes: two runs were lost to end-of-batch writes (D53)."""
+    small = tmp_path / "small.yaml"
+    small.write_text(
+        """
+version: 1
+seed: 1
+languages: ["en"]
+model_route: bulk
+dialogues_per_tactic: 1
+hard_negatives_per_category: 1
+min_utterances: 2
+max_utterances: 5
+output_path: data/synthetic/x.jsonl
+""",
+        encoding="utf-8",
+    )
+    cfg = load_corpus_config(small)
+    client = FakeClient([_tool_response(VALID_DIALOGUE_PAYLOAD)])
+    seen: list[str] = []
+
+    dialogues = generate_batch(cfg, client=client, sink=lambda d: seen.append(d.id))
+
+    assert seen == [d.id for d in dialogues], "the sink sees every dialogue, in order"
+    assert len(seen) == 15 + 5
+
+
+def test_generate_batch_skips_ids_already_generated(tmp_path):
+    """Resume: ids already on disk are not regenerated, so a crashed run continues."""
+    small = tmp_path / "small2.yaml"
+    small.write_text(
+        """
+version: 1
+seed: 1
+languages: ["en"]
+model_route: bulk
+dialogues_per_tactic: 1
+hard_negatives_per_category: 1
+min_utterances: 2
+max_utterances: 5
+output_path: data/synthetic/x.jsonl
+""",
+        encoding="utf-8",
+    )
+    cfg = load_corpus_config(small)
+    client = FakeClient([_tool_response(VALID_DIALOGUE_PAYLOAD)])
+    everything = generate_batch(cfg, client=client)
+    already = {d.id for d in everything[:5]}
+
+    client2 = FakeClient([_tool_response(VALID_DIALOGUE_PAYLOAD)])
+    rest = generate_batch(cfg, client=client2, skip_ids=already)
+
+    assert {d.id for d in rest} == {d.id for d in everything} - already
+    assert len(client2.models.calls) == len(everything) - len(already), "skipped ids cost no calls"
