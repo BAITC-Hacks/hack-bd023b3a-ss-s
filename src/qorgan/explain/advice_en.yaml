@@ -1,0 +1,62 @@
+# English recommendation strings (ADR D52). Externalized from recommend.py so localization can
+# be reviewed/edited without touching code; pending native-speaker review like the RU/KK files.
+# Every taxonomy tactic id MUST have an entry (coverage is validated at load time — a detected
+# tactic must never lack advice). Kazakhstani institutions are named, with a short gloss: the
+# reader is an English speaker in Kazakhstan, not a generic English audience.
+
+tactic_advice:
+  impersonation_bank: >-
+    Hang up and call your bank back on the number printed on your card — never on the
+    number that called you.
+  impersonation_gov_police: >-
+    Ask for the caller's full name, position and case number, then call the agency back on
+    its official number. Police do not settle matters with money over the phone.
+  impersonation_telecom_delivery: >-
+    Do not renew contracts or confirm personal details on an incoming call. Call your
+    operator or the delivery service on their official number.
+  urgency: >-
+    Do not rush. Pressure to "act right now" is itself a scam tactic. End the call and
+    check the facts yourself.
+  fear_threat: >-
+    Do not decide anything while frightened. Banks and police do not make threats by phone.
+    Verify through official channels.
+  secrecy: >-
+    "Tell no one" is a clear sign of a scam. Talk the call over with someone you trust, or
+    with bank staff, before you do anything.
+  otp_request: >-
+    Never read out a code from an SMS or push notification, to anyone. Genuine organisations
+    never ask for it.
+  credentials_request: >-
+    Do not give out your card number, CVV, IIN (your national ID number), logins or
+    passwords. Real bank staff do not need them.
+  safe_account: >-
+    Do not transfer money. There is no such thing as a "safe" or "reserve" account — this is
+    the single most common way money is stolen.
+  payment_redirect: >-
+    Do not pay via QR codes, payment terminals, cryptocurrency, or transfers to a personal
+    number because a caller told you to.
+  remote_access: >-
+    Do not install AnyDesk, TeamViewer or any other remote-access app — it hands the caller
+    control of your device and your accounts.
+  prize_lottery: >-
+    A real prize or payout never requires an advance payment or confirming your details by
+    phone. Check on the organisation's official website.
+  investment_scam: >-
+    "Guaranteed returns" is a hallmark of a pyramid scheme. Check the company's licence with
+    the regulator (ARDFM) before investing anything.
+  mule_recruitment: >-
+    Do not open cards in your name or accept other people's transfers for a fee — that is
+    money laundering, and you would be criminally liable.
+  verification_ploy: >-
+    Do not "confirm" your identity or a transaction on an incoming call. Hang up and call the
+    organisation on its official number.
+
+verification_questions:
+  - "Give me the case or request number, and your position."
+  - "Give me your staff identification number."
+  - "I will call you back on the official number from your organisation's website."
+  - "Send the request through the official app or my online account."
+
+low_confidence_note: >-
+  The signals are ambiguous. We are not saying this is a scam — please verify through official
+  channels yourself.

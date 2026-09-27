@@ -79,7 +79,7 @@ _DEFAULT_METER_MIN_TURNS_TO_ARM = 3
 # 1 = off (it trades one hairline scam for three fewer transient latches on test).
 _DEFAULT_METER_SHORT_WINDOW_TURNS = 1
 _DEFAULT_SEED = 42
-_DEFAULT_SUPPORTED_LOCALES: tuple[str, ...] = ("ru", "kk")
+_DEFAULT_SUPPORTED_LOCALES: tuple[str, ...] = ("ru", "kk", "en")
 _DEFAULT_LOCALE = "ru"
 # Corpus split fractions (test fraction is the remainder). Consumed by
 # `qorgan.data.build_corpus` for the deterministic train/val/test partition.

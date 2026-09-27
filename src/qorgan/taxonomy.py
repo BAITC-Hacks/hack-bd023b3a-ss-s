@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from qorgan.config import get_config
 
 _SUPPORTED_TAXONOMY_VERSION = 1
-_SUPPORTED_LOCALES = ("ru", "kk")
+_SUPPORTED_LOCALES = ("ru", "kk", "en")
 
 
 class TaxonomyError(ValueError):
@@ -30,12 +30,13 @@ class TacticDefinition(BaseModel):
     id: str
     ru: str
     kk: str
+    en: str
     description: str
     hard_signal: bool
     examples_ru: tuple[str, ...] = ()
     examples_kk: tuple[str, ...] = ()
 
-    @field_validator("id", "ru", "kk", "description")
+    @field_validator("id", "ru", "kk", "en", "description")
     @classmethod
     def _not_blank(cls, value: str) -> str:
         if not value.strip():
@@ -101,13 +102,13 @@ class Taxonomy(BaseModel):
         raise KeyError(f"Unknown tactic id: {tactic_id!r}")
 
     def display_name(self, tactic_id: str, locale: str) -> str:
-        """Localized (RU/KK) display name for `tactic_id`."""
+        """Localized display name for `tactic_id` (one field per supported locale)."""
         if locale not in _SUPPORTED_LOCALES:
             raise TaxonomyError(
                 f"Unsupported locale {locale!r}; expected one of {_SUPPORTED_LOCALES}"
             )
         tactic = self.get(tactic_id)
-        return tactic.ru if locale == "ru" else tactic.kk
+        return getattr(tactic, locale)  # field names are the locale codes
 
 
 def _raise_if_duplicates(ids: list[str], label: str) -> None:

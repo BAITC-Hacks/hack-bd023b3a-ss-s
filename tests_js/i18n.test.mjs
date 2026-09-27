@@ -84,7 +84,8 @@ test("content (advice, tactic names, templates) exists in exactly the content lo
   }
   assert.equal(contentLocale("kk"), "kk");
   assert.equal(contentLocale("ru"), "ru");
-  assert.equal(contentLocale("en"), "ru", "English chrome shows the reviewed Russian content");
+  assert.equal(contentLocale("en"), "en", "English content is reviewed YAML now, not a RU alias");
+  assert.equal(contentLocale("de"), "ru", "a locale without reviewed content still falls back");
 });
 
 test("initial locale: stored choice, then kk/ru browser languages, else Russian", () => {

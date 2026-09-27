@@ -1114,3 +1114,51 @@ lexicon, so it must be restored together with the old YAML).
 parity, runtime-gate and scrub fixtures regenerated; corpus rebuilt with an unchanged
 `content_hash` (the lexicon does not alter corpus content).
 
+### D52 — English becomes a reviewed content locale, not an alias for Russian (2026-09-27)
+The citizen page has offered English chrome since D47, but only the chrome: `CONTENT_LOCALES`
+was `["ru", "kk"]` and `contentLocale` mapped `en` onto `ru`, so an English-speaking user read
+English buttons and then **Russian** tactic names, advice, explanations and summary, under a
+notice admitting it. The seam was already named in the code; this closes it.
+
+**Scope, deliberately narrow.** This is the *content* layer only. `SupportedLanguage`
+(`ru|kk|mixed`) is the **corpus** enum and is untouched: the language a call is spoken in and
+the language its explanation is rendered in are independent axes, and English scam *data* is a
+separate piece of work. Nothing about the model, the lexicons or the corpus changes here, so no
+retrain and no eval movement — the risk head is byte-identical.
+
+**What changed.** `explain/templates_en.yaml` and `explain/advice_en.yaml` (all 15 tactics,
+verification questions, low-confidence note), an `en:` display name per tactic in
+`data/taxonomy/tactics.yaml`, `TacticDefinition.en` with `display_name` dispatching on the
+locale code, `_SUPPORTED_LOCALES` and `_DEFAULT_SUPPORTED_LOCALES` gaining `en`, and
+`QORGAN_SUPPORTED_LOCALES=ru,kk,en` in `.env.example`. On the client, `CONTENT_LOCALES` gains
+`en`; `contentLocale` needed no logic change because it was already generic.
+
+**Kazakhstani, in English.** The advice keeps the local institutions and glosses them —
+"IIN (your national ID number)", "the regulator (ARDFM)" — because the reader is an English
+speaker *in Kazakhstan*, not a generic English audience.
+
+**A string that would have become a lie.** `call.content_fallback` told English users that
+advice "is shown in Russian: they are written and reviewed in Kazakh and Russian only". The
+notice now never renders for a shipped locale (it is `hidden` whenever `locale === contentLocale`),
+but the trailing clause was false in a shipped bundle, so it was removed. The mechanism is kept:
+it is correct defensive behaviour for any future chrome-only locale.
+
+**Not changed, on purpose.** `pickLocale` still only auto-selects `kk` or `ru` from the browser
+language, so an English browser still *starts* in Russian and the user picks ENG. That looked
+like a deliberate choice in D47 rather than an oversight, and reversing a default is a product
+decision, not a content one. Worth an explicit answer now that English is complete.
+
+**Tests.** The locale-coverage tests are parametrised over `ru/kk/en` (advice covers every
+taxonomy id; every locale's templates are complete), plus a new test that each tactic has three
+*distinct* display names, so English can never silently become an alias again. Four tests used
+`"en"` as their example of an *unsupported* locale and now use `"de"` — the intent is preserved,
+only the example moved. The i18n unit test asserts `contentLocale("en") === "en"` and that an
+uncovered locale still falls back.
+
+**Evidence.** `pytest` **1246 passed / 2 skipped**; `npm test` **60/60**; the live i18n
+end-to-end suite passes in real Chrome (`node tests_js/tools/e2e_live_i18n.mjs`, scenes A/B/C),
+updated to assert the reviewed English summary note and English review chips and the **absence**
+of the fallback notice. Verified visually in the browser: verdict band, all eight tactic chips
+and the advice render in English while the Russian call transcript stays Russian with its
+trigger spans highlighted.
+

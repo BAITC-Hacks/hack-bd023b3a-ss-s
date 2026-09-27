@@ -2,7 +2,7 @@
 
 _Last updated: **2026-09-27**. Current-state doc for anyone picking the project up. Read this,
 then `docs/PLAN_2026-09.md` (the post-verdict plan and what is open), `docs/DECISIONS.md`
-(ADRs D11–D51), `docs/eval_report.md` (numbers, with intervals). The July sprint log below is
+(ADRs D11–D52), `docs/eval_report.md` (numbers, with intervals). The July sprint log below is
 kept as history._
 
 ## TL;DR (September 2026)
@@ -76,7 +76,7 @@ kept as history._
   calls with call content: `POST /api/reports`, `DELETE /api/reports/{receipt}`. Model load
   ~3 s from localhost, ~0.6 s first inference (WASM/WebGPU).
 
-## 2026-09-27 — publish gate repaired (D50); the Cyrillic-«СМС» cue gap closed (D51)
+## 2026-09-27 — publish gate repaired (D50); Cyrillic-«СМС» cues (D51); English content (D52)
 
 - **The one failing test was a real, published defect.** `ood.jsonl`
   `ood_neg_legit_gov_service_ru_1` carried an unscrubbed fabricated IIN — and so did the live
@@ -110,6 +110,16 @@ kept as history._
   `models/linear_d50_rollback`.
 - **Known gap, not bundled:** `reg_neg_reassure_legit_bank_call_ru_72` reads as textbook
   reassurance («Мы никогда не спросим…») but does not trip the reassurance lexicon.
+- **English is a reviewed content locale now (ADR D52).** The page has had English chrome since
+  D47, but `CONTENT_LOCALES` was `["ru","kk"]` and `contentLocale` mapped `en` onto `ru`, so an
+  English user got English buttons and Russian tactic names, advice and explanations. Added
+  `templates_en.yaml`, `advice_en.yaml` (all 15 tactics) and an `en:` name per tactic;
+  `QORGAN_SUPPORTED_LOCALES=ru,kk,en`. **Content layer only** — `SupportedLanguage`
+  (`ru|kk|mixed`) is the corpus enum and is untouched, so no retrain and no eval movement.
+  Verified in real Chrome (`tests_js/tools/e2e_live_i18n.mjs`, scenes A/B/C).
+- **Open product question:** `pickLocale` still auto-selects only `kk`/`ru` from the browser
+  language, so an English browser starts in Russian and the user must pick ENG. Left as D47 had
+  it — changing a default is a product call.
 
 ## 2026-09-25/26 — fresh-clone recheck + first improvement loop (branch `dev/loop`, committed as `0104ccd`)
 - **Fresh clone was not self-deployable:** `deploy_bootstrap.py` probed/retrained the model

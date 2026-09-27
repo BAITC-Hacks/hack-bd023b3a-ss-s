@@ -60,7 +60,7 @@ def test_explain_no_tags_uses_no_signal_reason():
 def test_explain_unsupported_locale_raises():
     result = ScoreResult(risk=0.1, backend="llm")
     with pytest.raises(ExplainerError):
-        explain(result, TRANSCRIPT, "en")
+        explain(result, TRANSCRIPT, "de")
 
 
 def test_explain_empty_transcript_raises():

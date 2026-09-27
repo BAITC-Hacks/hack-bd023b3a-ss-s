@@ -177,11 +177,15 @@ try {
     assert.equal(await page.isChecked("#lvReportConsent"), true);
     assert.equal(await page.isDisabled("#lvReportSend"), false);
 
-    await setLang(page, "en"); // English chrome, reviewed Russian content, and it says so
+    await setLang(page, "en"); // English chrome AND reviewed English content (ADR D52)
     assert.equal(await lang(page), "en");
     assert.equal((await page.textContent(".lv-summary-eyebrow")).trim(), STRINGS.en["summary.eyebrow"]);
-    assert.ok((await page.textContent(".lv-summary-note")).includes(config.templates.ru.human_note));
-    assert.equal((await page.textContent("#lvSummaryContent .lv-fallback")).trim(), STRINGS.en["call.content_fallback"]);
+    assert.ok((await page.textContent(".lv-summary-note")).includes(config.templates.en.human_note),
+      "the summary note is the reviewed English one, not the Russian fallback");
+    const enChips = await page.$$eval(".lv-report-tactic span", (els) => els.map((el) => el.textContent.trim()));
+    assert.ok(enChips.every((name) => tacticNames("en").has(name)), `review chips in English: ${enChips}`);
+    assert.equal(await page.locator("#lvSummaryContent .lv-fallback").count(), 0,
+      "no 'shown in Russian' notice: English content is reviewed now (ADR D52)");
     assert.equal(await page.inputValue("#lvReportText"), edited);
 
     await setLang(page, "kk");
@@ -191,7 +195,7 @@ try {
     assert.equal(await lang(page), "kk", "the choice is remembered");
     assert.equal(await page.inputValue("#lvScenario"), "live_scam_bank_kk", "a Kazakh visitor starts on the Kazakh scene");
     await context.close();
-    console.log("A: ru -> kk mid-call, summary + review re-rendered, edits kept, en fallback, choice persisted: OK");
+    console.log("A: ru -> kk mid-call, summary + review re-rendered, edits kept, en content, choice persisted: OK");
   }
 
   // ── B: fresh Kazakh phone, 360 px ──────────────────────────────────────────

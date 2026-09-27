@@ -103,7 +103,7 @@ def test_is_scam_mirrors_eval_run_truth_threshold():
 
 def test_replay_dialogue_raises_for_unsupported_locale():
     with pytest.raises(ValueError):
-        replay_dialogue(_scam_dialogue(), locale="en", backend="mock")
+        replay_dialogue(_scam_dialogue(), locale="de", backend="mock")
 
 
 def test_replay_dialogue_raises_clearly_for_unsupported_backend():

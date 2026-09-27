@@ -153,7 +153,7 @@ def test_full_transcript_is_kept_even_when_window_truncates():
 
 def test_initial_session_rejects_unsupported_locale():
     with pytest.raises(ValueError):
-        initial_session("en", backend="mock")
+        initial_session("de", backend="mock")
 
 
 def test_advance_does_not_mutate_input_state():
