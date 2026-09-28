@@ -115,7 +115,7 @@ Qorğan закрывает именно этот разрыв: он работа
 
 ### Неделя 1 (4–10 сентября) — рынок, позиционирование, аудит
 
-Кода в этой неделе нет намеренно: работа шла над тем, *что* именно строить.
+Коммитов на этой неделе нет — работа шла над тем, *что* именно строить.
 Имангали собрал анализ рынка и конкурентов, сформулировал позиционирование и value
 proposition, продумал product narrative. Сатжан провёл аудит проекта и данных, изучил
 законодательство и конкурентов, собрал список технических проблем. Параллельно
@@ -272,21 +272,26 @@ sounddevice). First use downloads two small Vosk models (~100 MB) to `~/.cache/v
 Put the call on speakerphone near the device. Without the extra, the Live tab's replay
 mode still works and the mic modes show an install hint.
 
-## The demo storyline (3 scenes)
-1. **Live scam call** (`live_scam_bank_ru` scenario) — the meter climbs to Critical,
-   evidence and advice appear mid-call, post-call summary offers a report.
-2. **Hard negative** (`live_hard_negative_bank_ru`) — a *real* bank call does **not**
+## The demo storyline (3 replay scenes + the analyst flow)
+All three ship in `site/core/scenarios.json` and were verified in real Chrome.
+1. **Russian scam call** (`live_scam_bank_ru`) — the meter climbs to Critical, evidence and
+   advice appear mid-call, the post-call summary offers a report.
+2. **Kazakh scam call** (`live_scam_bank_kk`) — the same, in Kazakh, with `secrecy`,
+   `otp_request` and `safe_account` firing on verbatim cue hits.
+3. **Hard negative** (`live_hard_negative_bank_ru`) — a *real* bank call does **not**
    trigger. False-positive discipline is the product's core metric.
-3. **Analyst view** — submit the report from scene 1 (use a number from a seeded org,
-   e.g. `+7 700 101 20 30`), then click **Ingest into analysis**: watch it land inside
-   that organization.
+
+Then the **analyst flow**: submit the report from scene 1 (use a number from a seeded org,
+e.g. `+7 700 101 20 30`), open `admin.html` with an analyst key and click **Ingest into
+analysis** — it lands inside that organization.
 
 ## Evaluate
 
 ```bash
-# FPR-first tables (test + authored_heldout + ASR-stress), per language
+# FPR-first tables, per language. `shift` is the cross-generator split -- the number to
+# lead with, and the reason the others read high (they share a generator with training).
 QORGAN_CLASSIFIER_BACKEND=linear python -m qorgan.eval.run \
-    --split test --split authored_heldout --split ood --by-language
+    --split test --split authored_heldout --split ood --split shift --by-language
 
 # Streaming eval: false-latch rate (live FPR analog), time-to-alert
 QORGAN_CLASSIFIER_BACKEND=linear python -m qorgan.eval.stream \
