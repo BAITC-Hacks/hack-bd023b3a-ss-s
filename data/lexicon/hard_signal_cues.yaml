@@ -12,6 +12,9 @@
 version: 1
 cues:
   secrecy:
+    - "do not tell anyone"  # EN (ADR D54)
+    - "don't tell anyone"
+    - "do not discuss this with anyone"
     - "Никому не говорите"
     - "это секретная операция"
     - "Не сообщайте сотрудникам банка"
@@ -20,6 +23,8 @@ cues:
     - "Банк қызметкерлеріне айтпаңыз"
     - "ешкімге айтпа"  # bare-imperative ASR form (no -ңыз suffix)
   otp_request:
+    - "tell me the code"  # EN (ADR D54); NOT bare "the code" -- see the invariant above
+    - "the six-digit code"
     - "Продиктуйте код из SMS"
     - "код из SMS"
     - "код из push"
@@ -33,6 +38,8 @@ cues:
     - "СМС тегі кодты айтыңыз"  # Cyrillic acronym, KK, ASR form (no suffix hyphen)
     - "алты санды атаңыз"
   credentials_request:
+    - "your card number and the CVV"  # EN (ADR D54)
+    - "your full card number"
     - "Назовите номер карты"
     - "номер карты и три цифры"
     - "три цифры на обороте"
@@ -41,6 +48,8 @@ cues:
     - "ЖСН-іңізді айтыңыз"
     - "ЖСН іңізді айтыңыз"  # ASR form: no suffix hyphen (PLAN A10)
   safe_account:
+    - "safe account"  # EN (ADR D54)
+    - "secure account"
     - "на безопасный счёт"
     - "безопасный счёт"
     - "безопасной счёт"  # ASR-normalized inflection (e.g. genitive-ish reading)
@@ -53,6 +62,7 @@ cues:
   remote_access:
     - "Установите приложение"
     - "AnyDesk"
+    - "TeamViewer"  # named in the comment below and used 35x across ru/kk/mixed/en, never a cue (ADR D54)
     - "Скачайте программу для защиты"
     - "қосымшасын орнатыңыз"
     - "бағдарламасын жүктеңіз"

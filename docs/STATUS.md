@@ -2,7 +2,7 @@
 
 _Last updated: **2026-09-27**. Current-state doc for anyone picking the project up. Read this,
 then `docs/PLAN_2026-09.md` (the post-verdict plan and what is open), `docs/DECISIONS.md`
-(ADRs D11–D52), `docs/eval_report.md` (numbers, with intervals). The July sprint log below is
+(ADRs D11–D54), `docs/eval_report.md` (numbers, with intervals). The July sprint log below is
 kept as history._
 
 ## TL;DR (September 2026)
@@ -75,6 +75,25 @@ kept as history._
   receipt, digest + `+7 700 ***` on disk, raw number absent; delete → gone. Only network
   calls with call content: `POST /api/reports`, `DELETE /api/reports/{receipt}`. Model load
   ~3 s from localhost, ~0.6 s first inference (WASM/WebGPU).
+
+## 2026-09-28 — English is a third call language (ADR D54)
+
+- **170 English dialogues** (120 positive / 50 hard negative, all 15 tactics), Kazakhstani in
+  English (Kaspi, eGov, tenge, IIN — 168/170). Generated separately (`configs/corpus_en.yaml`)
+  and merged by id so ru/kk/mixed were not regenerated.
+- **`shift` improved: FPR 0.061 → 0.030, recall 0.364 → 0.455.** Adding a fourth language
+  improved the hardest number, on **Russian and Kazakh** — partly the `TeamViewer` cue (it was
+  missing from `remote_access` for every language), partly register regularisation (cf. D42).
+- `test` 0.000 / **1.000** (n=143); all four languages 0.000 / 1.000; `authored_heldout` and
+  `ood` unchanged; styled `ood` 0.014 unchanged from D51. Streaming authored inspected 1/5 → 2/5.
+- **English is NOT at ru/kk quality — do not present it as if it were.** It has no
+  `authored_heldout` and no `shift`, so its 1.000 shares a generator with training. Against an
+  independent generator: recall 0.475 → **0.739**, but **FPR 0.078 → 0.227**. The 145 false
+  positives are entirely insurance and telemarketing — legitimate hard-sell calls — and no new
+  cue fired on any of them. **Next:** English negatives in the sales/insurance register with a
+  reassurance share (~40 %), as D27/D42 did for ru/kk. Rollback: `models/linear_d53_rollback`.
+- **Also fixed:** re-labelling overruled structural labels (32/50 English negatives came back
+  tagged, one at risk 1.000); `label.py` now returns the structural label for hard negatives.
 
 ## 2026-09-27 — publish gate repaired (D50); Cyrillic-«СМС» cues (D51); English content (D52)
 

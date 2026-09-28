@@ -1211,3 +1211,75 @@ and an unparseable payload is still `LLMResponseError`. Plus two generation test
 failure is retried, and exhausted retries raise loudly rather than yielding a short corpus.
 `pytest` 1250 passed / 2 skipped.
 
+### D54 — English becomes a third call language; what it fixed, and what it exposed (2026-09-28)
+D52 made English a reviewed *content* locale (the UI and the explanations). This makes it a
+**call** language: `SupportedLanguage` gains `en`, and the corpus gains 170 English dialogues
+(120 positive / 50 hard negative, all 15 tactics), generated through the existing Gemini
+pipeline with a language instruction that keeps the setting local — "Kaspi, Halyk, eGov, tenge,
+IIN; only the language is English". 168 of 170 carry a Kazakhstani marker, so this is
+**Kazakhstan in English**, not a US corpus.
+
+**Generated separately, on purpose.** `configs/corpus_en.yaml` writes its own file and
+`scripts/merge_synthetic.py` merges by id, so adding a language did not regenerate ru/kk/mixed
+and invalidate every number in this report. `configs/corpus.yaml` lists `en` so a full
+regeneration still reproduces the corpus.
+
+**Cues: measured one at a time, and two were rejected on evidence.** Candidates were derived
+from `train` only. `"your IIN"` fires on **20 legitimate calls** and `"confirm your IIN"` on 3 —
+the bare-mention trap the lexicon's own invariant warns about — so both were rejected in favour
+of request-shaped forms. `"the code"` and `"a one-time code"` measured **0** false hits and were
+*still* rejected: our English negatives contain **zero** reassurance language, so the corpus
+cannot reveal that risk. A clean measurement over a blind spot is not evidence.
+
+**A language-independent bug found along the way.** `AnyDesk` was a `remote_access` cue;
+**`TeamViewer` never was** — although the comment beside it names TeamViewer and the corpus uses
+it 35 times across ru/kk/mixed/en. Adding it helps Russian and Kazakh, not just English.
+
+**Re-labelling was overruling a structural label.** A hard negative is legitimate *by
+construction*, but `label.py` let the model overwrite that: on a legitimate bank call verifying
+an identity it returns risk 1.0 with tactic tags — **32 of 50** English negatives came back
+tagged, one at risk 1.000. The existing ru/kk corpus is clean only because the historical run
+relabelled positives only; the protection was a property of how it was run, not of the code.
+`_build_label` now returns the structural label for hard negatives (see the commit).
+
+**Results** (device backend, threshold 0.59):
+`test` FPR 0.000 / recall **1.000** (n=143, English included) · per language all four at
+0.000 / 1.000 · `authored_heldout` 0.000 / 0.889 and `ood` 0.000 / 0.932, both unchanged ·
+**`shift` 0.061 → 0.030 FPR and 0.364 → 0.455 recall**. That last one is the surprise worth
+stating plainly: adding a *fourth language* improved cross-generator recall on **Russian and
+Kazakh**, which is the project's hardest number — partly the `TeamViewer` cue, partly a fourth
+register regularising the head, consistent with D42. Styled FPR: test and authored 0.000, `ood`
+0.014 — unchanged from D51, not a new regression. Streaming: test false-latch 3/60, alert-hit
+0.988; authored clean 1/19 unchanged, inspected 1/5 → 2/5 (cost, on record).
+
+**The honest caveat, and it is a big one.** English has **no `authored_heldout` anchors and no
+`shift` split**, so its 1.000 shares a generator with its training data — exactly the weakness
+D35 exists to expose. Measured against an independent generator
+(`BothBosu/scam-dialogue`, Apache-2.0, evaluation only):
+
+| English probe | before English training | after |
+|---|---|---|
+| recall | 0.475 | **0.739** |
+| FPR | 0.078 | **0.227** |
+
+Recall improved everywhere (refund 0.094 → 0.394, reward 0.225 → 0.606, ssn → 1.000, support
+0.631 → 0.956). **But FPR tripled**, and FPR is the primary metric. Diagnosed rather than
+guessed: the 145 false positives are **entirely insurance (66) and telemarketing (79)** — pushy
+but legitimate sales calls — and **not one of the new cues fired on any of them**. The cues are
+innocent; the model has simply never seen a legitimate hard-sell call in English. Our 50
+English negatives cover delivery, family, chit-chat, bank and e-gov, with no sales register and
+no reassurance language at all.
+
+**Therefore: English is not at Russian/Kazakh quality and must not be presented as if it were.**
+The fix is known and scoped — English negatives in the pushy-sales and insurance registers,
+~40 % of them carrying the reassurance counter-signal, exactly as D27/D42 did for ru/kk. A first
+attempt stalled on repeated silent sockets (the API throttles after a burst and the connections
+hang rather than returning 429), and because
+`augment_register_diversity.py` still writes once at the end, that batch was lost. Note the
+probe's own limit: its legitimate calls are US-register, so some of that 0.227 is a distribution
+we do not serve — but the reassurance and sales-register gaps are real regardless.
+
+**Tooling.** `--languages` on both augmentation scripts (they hardcoded `ru/kk/mixed`), and
+`--tag` on `augment_register_diversity.py`, because an untagged rerun **overwrites the committed
+ru/kk/mixed batch** — caught before running it, not after.
+
