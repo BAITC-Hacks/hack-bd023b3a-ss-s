@@ -1421,3 +1421,66 @@ corpus **and in the live Hub copy** (legal gap M11). Repaired with
 threshold, so it cannot change a decision, and one line of `ood.jsonl` changed. The Hub copy is
 still unrepaired: publishing is outward-facing and waits for sign-off, bundled with this model.
 
+## Addendum (2026-09-28) — English as a third call language (ADR D54)
+
+Pasted from harness output. Device backend, `backend=linear`, threshold 0.59. The corpus gains
+170 English dialogues; ru/kk/mixed are untouched (English was generated separately and merged).
+
+### Clean text
+
+| Split | FPR [95% CI] | Precision | Recall [95% CI] | F1 | N |
+|---|---|---|---|---|---|
+| test | 0.000 [0.000, 0.060] | 1.000 | 1.000 [0.957, 1.000] | 1.000 | 143 |
+| authored_heldout | 0.000 [0.000, 0.142] | 1.000 | 0.889 [0.653, 0.986] | 0.941 | 42 |
+| ood | 0.000 [0.000, 0.049] | 1.000 | 0.932 [0.813, 0.986] | 0.965 | 118 |
+| shift | 0.030 [0.001, 0.158] | 0.938 | 0.455 [0.281, 0.636] | 0.612 | 66 |
+| shift (clean) | 0.000 [0.000, 0.112] | 1.000 | 0.455 [0.281, 0.636] | 0.625 | 64 |
+
+`test` by language — en 0.000 / 1.000 (n=28) · kk 0.000 / 1.000 (n=39) · mixed 0.000 / 1.000
+(n=39) · ru 0.000 / 1.000 (n=37).
+
+**`shift` moved the right way: FPR 0.061 → 0.030, recall 0.364 → 0.455.** `shift` is ru/kk/mixed
+only, so a fourth language improved cross-generator performance on the other three. Two
+contributions are identifiable: the `TeamViewer` cue (missing for every language until now) and
+a fourth register regularising the head, as D42 found for register diversity.
+
+### Streaming and ASR-styled
+
+| Split | False-Latch | Alert-Hit | N+ | N- |
+|---|---|---|---|---|
+| test | 0.050 [0.010, 0.139] | 0.988 [0.935, 1.000] | 83 | 60 |
+| authored_heldout (clean) | 0.053 [0.001, 0.260] | 0.889 [0.653, 0.986] | 18 | 19 |
+
+Styled FPR: `test` 0.000, `authored_heldout` 0.000, `ood` 0.014 — **unchanged from D51**, same
+row, not a new regression. Cue and reassurance survival 17/17, 13/13, 10/10 and 5/5, 9/9, 6/6.
+Cost on record: authored streaming inspected false-latch 1/5 → 2/5 (clean 1/19 unchanged).
+
+### The number that matters most: English against an independent generator
+
+English has **no `authored_heldout` and no `shift`**, so the 1.000 above shares its generator
+with English training data — the exact weakness D35 exists to expose. `BothBosu/scam-dialogue`
+(Apache-2.0, 640 scam / 640 legit, evaluation only) is the independent check:
+
+| | before English training | after |
+|---|---|---|
+| recall | 0.475 [0.436, 0.515] | **0.739 [0.703, 0.773]** |
+| FPR | 0.078 [0.059, 0.102] | **0.227 [0.195, 0.261]** |
+
+By scam type: refund 0.094 → 0.394 · reward 0.225 → 0.606 · ssn 0.950 → 1.000 · support
+0.631 → 0.956.
+
+**Recall improved everywhere and FPR tripled.** FPR is the primary metric, so on the measure
+this project cares about most, English got worse against an unseen generator. Diagnosed rather
+than guessed: the 145 false positives are **entirely insurance (66) and telemarketing (79)** —
+pushy but legitimate sales calls — with none from delivery or wrong-number, and **not one of the
+new English cues fired on any of them**. The cues are innocent; the model has never seen a
+legitimate hard-sell call in English. Our 50 English negatives cover delivery, family,
+chit-chat, bank and e-gov, with no sales register and zero reassurance language.
+
+**Conclusion: English is not at Russian/Kazakh quality.** The `test` 1.000 is real but
+in-generator; the independent FPR is the number to quote. The fix is scoped — English negatives
+in the sales/insurance registers with ~40 % carrying reassurance, as D27/D42 did for ru/kk.
+Caveat on the probe itself: its legitimate calls are US-register, so part of that 0.227 is a
+distribution the product does not serve; the reassurance and sales-register gaps are real
+regardless.
+

@@ -207,12 +207,15 @@ def main(argv: list[str] | None = None) -> int:
             continue
         negatives.append(scrub_dialogue(dialogue))
         print(f"  neg   {category.id:32s} {language:5s} {len(dialogue.utterances)} turns", flush=True)
+        with _outputs(args.tag)[1].open("a", encoding="utf-8") as _partial:
+            _partial.write(dialogue.model_dump_json() + "\n")  # crash-safe partial (ADR D54)
+            _partial.flush()
 
     AUGMENT_DIR.mkdir(parents=True, exist_ok=True)
     output, output_negatives, manifest_path = _outputs(args.tag)
     if scams:
         write_dialogues_jsonl(scams, output)
-    write_dialogues_jsonl(negatives, output_negatives)
+    write_dialogues_jsonl(negatives, output_negatives)  # final, canonical write
     manifest_path.write_text(json.dumps({
         "purpose": "register diversity for TRAIN (ADR D35 follow-up): same generator, widened prompting",
         "seed": args.seed,
