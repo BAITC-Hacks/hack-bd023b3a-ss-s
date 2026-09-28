@@ -81,9 +81,10 @@ kept as history._
 - **170 English dialogues** (120 positive / 50 hard negative, all 15 tactics), Kazakhstani in
   English (Kaspi, eGov, tenge, IIN — 168/170). Generated separately (`configs/corpus_en.yaml`)
   and merged by id so ru/kk/mixed were not regenerated.
-- **`shift` improved: FPR 0.061 → 0.030, recall 0.364 → 0.455.** Adding a fourth language
-  improved the hardest number, on **Russian and Kazakh** — partly the `TeamViewer` cue (it was
-  missing from `remote_access` for every language), partly register regularisation (cf. D42).
+- **`shift` moved: FPR 0.061 → 0.030, recall 0.364 → 0.455** (12/33 → 15/33). **Not a proven
+  effect** — the intervals overlap heavily, it is one run, and English data, the `TeamViewer`
+  cue and the retrain all changed together. Recorded as a co-occurrence; an ablation would be
+  needed to attribute it.
 - `test` 0.000 / **1.000** (n=143); all four languages 0.000 / 1.000; `authored_heldout` and
   `ood` unchanged; styled `ood` 0.014 unchanged from D51. Streaming authored inspected 1/5 → 2/5.
 - **English is NOT at ru/kk quality — do not present it as if it were.** It has no

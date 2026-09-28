@@ -1439,10 +1439,11 @@ Pasted from harness output. Device backend, `backend=linear`, threshold 0.59. Th
 `test` by language — en 0.000 / 1.000 (n=28) · kk 0.000 / 1.000 (n=39) · mixed 0.000 / 1.000
 (n=39) · ru 0.000 / 1.000 (n=37).
 
-**`shift` moved the right way: FPR 0.061 → 0.030, recall 0.364 → 0.455.** `shift` is ru/kk/mixed
-only, so a fourth language improved cross-generator performance on the other three. Two
-contributions are identifiable: the `TeamViewer` cue (missing for every language until now) and
-a fourth register regularising the head, as D42 found for register diversity.
+**`shift` moved: FPR 0.061 → 0.030, recall 0.364 → 0.455** (12/33 → 15/33). Read this as a
+co-occurrence, not a result: 0.364 [0.204, 0.549] → 0.455 [0.281, 0.636] overlap heavily, it is
+a single run, and three changes landed together (English training data, the `TeamViewer` cue,
+the retrain). Attributing it would need an ablation — retrain with the cue but without the
+English rows — which has not been run.
 
 ### Streaming and ASR-styled
 

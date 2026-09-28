@@ -1213,7 +1213,8 @@ failure is retried, and exhausted retries raise loudly rather than yielding a sh
 
 ### D54 — English becomes a third call language; what it fixed, and what it exposed (2026-09-28)
 D52 made English a reviewed *content* locale (the UI and the explanations). This makes it a
-**call** language: `SupportedLanguage` gains `en`, and the corpus gains 170 English dialogues
+**call** language (the third: ru, kk, en — `mixed` is kk/ru code-switching, not a separate
+language): `SupportedLanguage` gains `en`, and the corpus gains 170 English dialogues
 (120 positive / 50 hard negative, all 15 tactics), generated through the existing Gemini
 pipeline with a language instruction that keeps the setting local — "Kaspi, Halyk, eGov, tenge,
 IIN; only the language is English". 168 of 170 carry a Kazakhstani marker, so this is
@@ -1245,10 +1246,11 @@ relabelled positives only; the protection was a property of how it was run, not 
 **Results** (device backend, threshold 0.59):
 `test` FPR 0.000 / recall **1.000** (n=143, English included) · per language all four at
 0.000 / 1.000 · `authored_heldout` 0.000 / 0.889 and `ood` 0.000 / 0.932, both unchanged ·
-**`shift` 0.061 → 0.030 FPR and 0.364 → 0.455 recall**. That last one is the surprise worth
-stating plainly: adding a *fourth language* improved cross-generator recall on **Russian and
-Kazakh**, which is the project's hardest number — partly the `TeamViewer` cue, partly a fourth
-register regularising the head, consistent with D42. Styled FPR: test and authored 0.000, `ood`
+**`shift` 0.061 → 0.030 FPR and 0.364 → 0.455 recall.** State this carefully: the intervals
+overlap heavily (0.364 [0.204, 0.549] → 0.455 [0.281, 0.636], 12/33 → 15/33), it is a single
+run, and **three things changed together** — English training data, the `TeamViewer` cue, and
+the retrain itself. So this is a co-occurrence worth recording, not a demonstrated effect of
+adding a language; isolating it needs an ablation we have not run. Styled FPR: test and authored 0.000, `ood`
 0.014 — unchanged from D51, not a new regression. Streaming: test false-latch 3/60, alert-hit
 0.988; authored clean 1/19 unchanged, inspected 1/5 → 2/5 (cost, on record).
 

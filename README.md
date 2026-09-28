@@ -14,13 +14,21 @@
 
 ## 1. Задача
 
-Телефонное мошенничество в Казахстане — массовая проблема. По цифрам, которые
-Антифрод-центр Нацбанка РК озвучивал в публичных брифингах, с июля 2024 по февраль 2026
-зафиксировано более 111 000 инцидентов, из них порядка 21 000 — ложные телефонные звонки
-(первичного открытого датасета центр не публикует, поэтому цифру приводим как
-ориентир, а не как измерение). Существующие меры работают на уровне транзакций и номеров —
-то есть *после* разговора. Размеченного корпуса мошеннических разговоров в официальном
-контуре нет.
+Телефонное мошенничество в Казахстане — массовая проблема. По официальному сообщению
+Нацбанка РК от 04.02.2026, на 1 января 2026 года Антифрод-центр зафиксировал **80 871
+инцидент** с признаками мошенничества (плюс около 19 810 по наркообороту, игорному бизнесу
+и пирамидам); заблокировано 2,8 млрд ₸
+([nationalbank.kz/.../18571](https://www.nationalbank.kz/ru/news/informacionnye-soobshcheniya/18571)).
+
+Масштаб подтверждается и уголовной статистикой: за январь–ноябрь 2025 года в Казахстане
+зарегистрировано **26,3 тыс. уголовных правонарушений**, связанных с интернет-мошенничеством —
+рекорд, при официально зафиксированном ущербе около 12,2 млрд ₸
+([informburo.kz](https://informburo.kz/novosti/rekordnoe-kolicestvo-skolko-slucaev-mosennicestva-v-seti-zaregistrirovali-v-kazaxstane-v-2025-godu)).
+
+Существующие меры работают с транзакциями и номерами — **до или после разговора, но не во
+время него**: блокировка номера срабатывает на входе, антифрод по транзакции — на выходе.
+Сам разговор, в котором человека убеждают, не видит никто. Размеченного корпуса
+мошеннических разговоров в официальном контуре тоже нет.
 
 Qorğan закрывает именно этот разрыв: он работает с **содержанием разговора** и даёт
 гражданину объяснённое предупреждение в момент звонка, а государству — картину
@@ -40,14 +48,21 @@ Qorğan закрывает именно этот разрыв: он работа
 
 | Набор | FPR [95% ДИ] | Recall [95% ДИ] | N |
 |---|---|---|---|
-| `test` | 0.000 [0.000, 0.060] | 1.000 [0.957, 1.000] | 143 |
+| `test` | 0.000 [0.000, 0.060] | 1.000 [0.957, 1.000] | 143¹ |
 | `authored_heldout` (ручной) | 0.000 [0.000, 0.142] | 0.889 [0.653, 0.986] | 42 |
 | `ood` (вне распределения) | 0.000 [0.000, 0.049] | 0.932 [0.813, 0.986] | 118 |
 | `shift` (**другой генератор**) | 0.030 [0.001, 0.158] | 0.455 [0.281, 0.636] | 66 |
 
+¹ Было 115 до сентября; рост — за счёт английских диалогов, добавленных на неделе 4.
 По языкам на `test`: kk, ru, mixed, en — везде FPR 0.000 / recall 1.000.
 Потоковый режим (звонок по репликам): ложная фиксация 3/60, срабатывание 0.988,
 медиана — 3 реплики до тревоги.
+
+**Откуда взялся recall 1.000 на `test`.** Не подгонкой под ошибки теста. Дефект («SMS»
+латиницей в словаре против «СМС» кириллицей в живой речи) найден при разборе внешнего
+корпуса реальных сообщений о мошенничестве и подтверждён на 272 реальных выходах
+распознавателя в `data/asr_capture/` — то есть вне тестовой выборки. Исправление затронуло
+53 строки корпуса, из них 3 в `test` (ADR D51).
 
 **Честная оговорка, которую мы держим на виду.** `shift` — это 66 звонков, написанных
 *другим* генератором, который не видел ни нашего корпуса, ни промптов, ни словарей. Recall
@@ -71,7 +86,7 @@ Qorğan закрывает именно этот разрыв: он работа
   (ст. 7, 9, 12, 16, 17, 19-1), Закона об ИИ № 230-VIII и Цифрового кодекса применительно
   к нашим потокам данных, со списком разрывов до пилота.
 - **Качество**: 1257 тестов Python + 60 JS (включая пословную сверку браузерного и
-  серверного расчёта на золотых фикстурах), 51 архитектурное решение (D1–D54) в `docs/DECISIONS.md`.
+  серверного расчёта на золотых фикстурах), 51 решение, номера D1–D54 (часть номеров пропущена) в `docs/DECISIONS.md`.
 
 ---
 
@@ -96,7 +111,7 @@ Qorğan закрывает именно этот разрыв: он работа
 Спринт отбора: скелет проекта, таксономия из 15 тактик, синтетический корпус (Gemini),
 первый классификатор и работающее демо «расшифровка → риск → объяснение». Уже тогда был
 заложен принцип, который мы дальше не нарушали: **объяснение строится на дословных
-фрагментах разговора, а не на свободном тексте модели**. 25 коммитов.
+фрагментах разговора, а не на свободном тексте модели**. 19 коммитов.
 
 ### Неделя 1 (4–10 сентября) — рынок, позиционирование, аудит
 
@@ -152,9 +167,14 @@ proposition, продумал product narrative. Сатжан провёл ау�
   жёсткий сигнал**. После исправления recall на `test` 0.984 → 1.000.
 - **D53**: три ошибки надёжности клиента LLM (зависание на 83 минуты при 0 % CPU,
   необработанный обрыв соединения, потеря целой партии при записи в конце).
-- **D54**: английский стал **третьим языком звонка** (170 диалогов, казахстанские реалии
-  на английском). Побочный эффект, которого мы не ждали: `shift` улучшился до
-  **FPR 0.030 / recall 0.455** — четвёртый язык помог качеству на казахском и русском.
+- **D54**: английский стал **третьим языком звонка** (ru, kk, en; `mixed` — это
+  казахско-русское переключение кодов, а не отдельный язык). 170 диалогов с казахстанскими
+  реалиями на английском: язык нужен экспатам и иностранным резидентам, которым звонят те же
+  схемы, а партнёр программы inDrive работает на десятках рынков. Вместе с этим изменением
+  `shift` сдвинулся до **FPR 0.030 / recall 0.455**. Осторожно с интерпретацией: было
+  0.364 [0.204, 0.549], стало 0.455 [0.281, 0.636] — **интервалы сильно пересекаются, это
+  один прогон, и одновременно менялись три вещи** (английские данные, подсказка `TeamViewer`,
+  переобучение). Эффект не доказан; мы фиксируем совпадение, а не причину.
 
 ---
 
@@ -192,7 +212,7 @@ proposition, продумал product narrative. Сатжан провёл ау�
 | Документ | О чём |
 |---|---|
 | [`docs/STATUS.md`](docs/STATUS.md) | Текущее состояние и передача дел — читать первым |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 51 архитектурное решение (D1–D54) с датами и измерениями |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 51 решение, номера D1–D54 (D11, D15, D16 пропущены), с датами и измерениями |
 | [`docs/eval_report.md`](docs/eval_report.md) | Все числа с интервалами, источник истины |
 | [`docs/LEGAL_ASSESSMENT.md`](docs/LEGAL_ASSESSMENT.md) | Правовая оценка по законодательству РК |
 | [`docs/PLAN_2026-09.md`](docs/PLAN_2026-09.md) | План после вердикта совета |
@@ -204,13 +224,17 @@ proposition, продумал product narrative. Сатжан провёл ау�
 
 # Technical reference (English)
 
-## What it does — three tabs, one pipeline
+## What it does — three pages, one pipeline
 
-| Tab | Persona | What happens |
+The product is the static PWA under `site/`. (The Streamlit app in `app/` is a local dev
+harness only — ADR D4 — it scores in the server process and its mic mode uploads audio. Do
+not read it as the product.)
+
+| Page | Persona | What happens |
 |---|---|---|
-| **Level 1 — Call check** | citizen | Paste/pick a transcript → calibrated **risk score** → **explained** alert: highlighted trigger phrases, tactic tags, plain RU/KK reason, honest confidence. |
-| **Live call** | citizen | A call is analyzed **turn by turn**: streaming utterances → rolling window → **0–100 suspicion meter** (hysteresis + hard-signal floors) → grounded evidence cards → tactic-specific advice (RU/KK) → post-call summary → **consent-gated, editable report**. Input: replay a script (zero setup), or a real **microphone** (browser or local) with dual Vosk KK+RU streaming ASR. |
-| **Level 2 — Analyst view** | gov analyst | KPI row, priority queue of scam **organizations** (named by dominant tactics), new-scheme flags, drill-down with tactic/activity charts — and an **Ingest** button that pulls submitted citizen reports into the analysis (a report whose number matches a known org joins it; unknown numbers become novelty candidates). |
+| **Landing** (`index.html`) | citizen | What the tool does and does not do, in KK / RU / EN, with the AI disclosure and the download-size notice before the first model fetch. |
+| **Live call** (`live.html`) | citizen | The call is analysed **turn by turn, in the browser**: utterances (replayed script, or the microphone via dual Vosk KK+RU with per-utterance voting) → rolling window → int8 `multilingual-e5-base` in a web worker → **0–100 suspicion meter** (hysteresis, hard-signal floors) → verbatim trigger phrases, tactic tags, a templated reason and tactic-specific advice in the chosen language → post-call summary → **reviewed, editable, consent-gated report** with a redaction preview. Nothing leaves the device until the citizen sends it. |
+| **Analyst console** (`admin.html`) | gov analyst | Fed **only** by consented reports. KPI row, priority queue of scam organizations named by dominant tactics, novel-scheme flags, drill-down. Per-person keys, analyst vs investigator roles, a stated purpose code and an hourly budget to open a full transcript, and an HMAC-chained audit log (ADR D46). |
 
 ## Quick start
 
@@ -282,7 +306,7 @@ QORGAN_CLASSIFIER_BACKEND=linear python -m qorgan.eval.adversarial --split adver
 # punctuation, numerals as words), paired; --drop-latin is the worst case for «SMS»/«CVV»
 QORGAN_CLASSIFIER_BACKEND=linear python -m qorgan.eval.asr_realism [--drop-latin]
 
-pytest -q        # ~1,070 tests, all offline
+pytest -q        # 1,257 tests, all offline
 npm test         # JS core parity with Python + the DEVICE gate (browser embeddings, seconds)
 npm run gate:browser   # re-capture the browser's embeddings of the gate set (headless Chromium;
                        # `npx playwright install chromium` once) after a model/runtime change
@@ -293,38 +317,27 @@ npm run device:serve -- --pages 4 &
 QORGAN_EMBED_BACKEND=device python -m qorgan.classifier.linear_train
 ```
 
-Shipped numbers (threshold 0.59, 2026-09-24, computed on the **browser's own embeddings** —
-ADR D33, so they describe what the device decides, browser gate 0/200; corpus repaired, ADR D34;
-training register widened, ADR D42):
-**test FPR 0.000 / recall 0.984 · authored_heldout FPR 0.000 / recall 0.889 · ood FPR 0.000 /
-recall 0.932 · ASR-styled FPR 0.000 on every split · adversarial (cue-free) recall 0.945 ·
-adversarial (legit-sounding) recall 0.835**. Read them with their intervals: `authored_heldout` is
-**hand-written, not real calls** (18 scam / 24 legit), so its FPR of 0.000 has a 95 %
-Clopper–Pearson interval of **[0.000, 0.142]** and its recall of 0.889 is 16/18 — the two
-misses are named in the report; test's 0.000 is **[0.000, 0.070]** on 51 negatives; five
-authored negatives were read during feature engineering and are reported separately
-(`data/anchors/inspection_ledger.yaml`). The server's native runtime is a cosine-0.98 proxy
-of the device and disagrees on 6/200 borderline calls — reported, not hidden. The harness
-prints intervals on every run.
+**Numbers live in one place.** The current, measured state — FPR-first, with Clopper–Pearson
+intervals, per split and per language — is the table in **§2 above**; the full methodology and
+every ablation is [`docs/eval_report.md`](docs/eval_report.md). They are deliberately not
+repeated here: this section used to carry its own copy, it drifted out of date, and a reviewer
+caught the contradiction.
 
-**The number to lead with, though, is this one (ADRs D35/D42/D43):** on a 66-call split
-written by a *second generator* (`shift`: 33 scams / 33 confusable legit, ru / kk / mixed,
-authored without sight of the corpus or the lexicons — `data/README.md`), the same model has
-**recall 0.364 [0.204, 0.549] and FPR 0.061 [0.007, 0.202]** — 12 of 33 scams. It was 8 of 33
-until the training register was widened (D42), which is the honest measure of how much of the
-earlier gap was one generator's house style rather than scam semantics. Both of that split's
-false positives are rows read while debugging and are ledger-marked, so the harness also
-prints `shift (clean)` — FPR **0.000 [0.000, 0.112]** on the 64 rows never looked at (D43). Every other
-split above shares its generator (Gemini) with the training data, so their recall is largely
-that generator's register. The reassurance feature still holds (real fraud alerts score
-≤ 0.01) and the FPR story survives, but until real calls exist the recall claim is "one
-generator's scams", and the `shift` table in the eval report is the honest one. The cloud
-second opinion (`llm` backend, Gemini 2.5 Pro, offered on the citizen's explicit request) scores
-the same 66 calls at **33 / 33 recall and 0 / 33 FPR** (ADR D38) — that is the accuracy tier;
-the device model is the privacy tier. The gap between 12/33 and 33/33 is the honest measure of
-what running on-device currently costs, and closing it needs real calls (A3), not more
-synthetic data. Methodology + caveats: [`docs/eval_report.md`](docs/eval_report.md), data
-provenance: [`data/README.md`](data/README.md).
+Three points that belong with the numbers rather than in the table:
+
+- **They describe the device.** Heads are trained and evaluated on the **browser's own
+  embeddings** (ADR D33), so the figures describe what the citizen's device decides, not a
+  server approximation. The server's native runtime is a cosine-0.98 proxy and disagrees on
+  6/200 borderline calls — reported, not hidden.
+- **`shift` is the number to lead with.** 66 calls written by a *second generator* that never
+  saw the corpus, the prompts or the lexicons. Every other split shares its generator with
+  training data, so their recall is largely that generator's register. Until real calls exist
+  (A3), the recall claim is "one generator's scams".
+- **The cloud tier is the accuracy tier, and it is off by default.** On those same 66 calls the
+  `llm` backend (Gemini 2.5 Pro) scores 33/33 recall at 0/33 FPR (ADR D38). It sends text
+  abroad, so it requires `QORGAN_CLOUD_TIER=on` plus the citizen's per-request consent, is
+  never cached and is refused outright on analyst routes (ADR D49). The gap between the device
+  model and that tier is the honest cost of running on-device.
 
 ## Microphone mode (on-device speech recognition)
 
@@ -424,9 +437,15 @@ asr · eval) · `app/` (Streamlit: `streamlit_app.py`, `live_view.py`, `mic_live
 `docs/` (scope, architecture, decisions, status, eval report).
 
 ## Status & limits
-Web prototype. The live-mic path is real (Vosk streaming, KK/RU voting) but
+**Level 1 analysis already runs on the device** — `site/` is a static PWA that loads the int8
+ONNX embedder and the exported heads and scores in the browser; no route accepts audio. What
+remains roadmap is **mobile** (phones are gated on the Android Vosklet benchmark, ADR D26) and
+**carrier integration** ([`DOCUMENTATION.md`](DOCUMENTATION.md)).
+
+The live-mic path is real (dual Vosk KK+RU streaming, per-utterance voting) but
 speakerphone-quality ASR — especially Kazakh — is the accuracy bottleneck; the meter's
-confidence weighting absorbs some of it. ~1 in 6 legit calls still latches the live meter
-*transiently* mid-call (documented, measured by `eval.stream`; fix candidates in
-`docs/STATUS.md`). Mobile, on-device, and carrier integration are the roadmap
-([`DOCUMENTATION.md`](DOCUMENTATION.md)), not this repo.
+confidence weighting absorbs some of it. Transient mid-call latching on legitimate calls is
+measured by `eval.stream` rather than estimated: currently **3/60 on `test`** and **1/19 on the
+clean authored negatives**, with the inspected anchors reported separately. English is the
+weakest language and is **not at Russian/Kazakh quality** — see §5 above. Real call recordings
+do not exist yet (A3); every number is synthetic or author-written.
