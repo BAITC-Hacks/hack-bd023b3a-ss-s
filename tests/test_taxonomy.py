@@ -45,7 +45,16 @@ def test_display_name_ru_and_kk():
 def test_display_name_unsupported_locale_raises():
     taxonomy = load_taxonomy(REAL_TAXONOMY_PATH)
     with pytest.raises(TaxonomyError):
-        taxonomy.display_name("otp_request", "en")
+        taxonomy.display_name("otp_request", "de")
+
+
+def test_display_name_covers_every_supported_locale():
+    """Each shipped locale has its own reviewed name -- English is no longer an alias for RU."""
+    taxonomy = load_taxonomy(REAL_TAXONOMY_PATH)
+    for tactic_id in taxonomy.tactic_ids():
+        names = {loc: taxonomy.display_name(tactic_id, loc) for loc in ("ru", "kk", "en")}
+        assert all(n.strip() for n in names.values())
+        assert len(set(names.values())) == 3, f"{tactic_id} reuses a name across locales"
 
 
 def test_get_unknown_tactic_raises_keyerror():

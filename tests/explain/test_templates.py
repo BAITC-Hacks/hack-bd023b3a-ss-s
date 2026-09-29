@@ -184,3 +184,16 @@ def test_confidence_band_medium_boundary_at_point_six(templates):
 
 def test_confidence_band_low_below_medium_boundary(templates):
     assert confidence_band(templates, 0.59) == templates.confidence["low"]
+
+
+@pytest.mark.parametrize("locale", ["ru", "kk", "en"])
+def test_every_content_locale_has_complete_templates(locale):
+    """Every locale the product offers must render explanations from its own reviewed YAML."""
+    templates_dir = Path(__file__).resolve().parents[2] / "src" / "qorgan" / "explain"
+    templates = load_templates(locale, templates_dir)
+    assert templates.reason_template.strip()
+    assert templates.no_signal_reason.strip()
+    assert templates.human_note.strip()
+    for level in ("high", "medium", "low", "unknown"):
+        assert templates.confidence[level].strip()
+

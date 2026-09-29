@@ -22,7 +22,13 @@ from typing import Any
 
 from qorgan.config import get_config
 from qorgan.data.schema import ScoreResult, TacticTag, spans_from_phrases
-from qorgan.llm_tools import LLMResponseError, build_client, generate_json, thinking_budget_for
+from qorgan.llm_tools import (
+    LLMResponseError,
+    build_client,
+    generate_json,
+    is_transient,
+    thinking_budget_for,
+)
 
 # Headroom so Gemini 2.5 thinking tokens (which count against this budget) never truncate
 # the JSON verdict -- this is the shipping/demo backend, so truncation here breaks the demo.
@@ -188,18 +194,8 @@ def _generate_with_deadline(client: Any, model: str, transcript: str) -> dict[st
 
 
 def _is_transient(exc: Exception) -> bool:
-    """Timeouts, connection drops and retryable HTTP statuses (the SDK's `APIError.code`)."""
-    if isinstance(exc, (TimeoutError, ConnectionError)):
-        return True
-    try:
-        import httpx
-
-        if isinstance(exc, httpx.HTTPError):
-            return True
-    except ImportError:  # pragma: no cover
-        pass
-    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-    return isinstance(code, int) and code in _RETRYABLE_STATUS
+    """Shared with the generate/label CLIs (`llm_tools.is_transient`, ADR D53)."""
+    return is_transient(exc)
 
 
 @functools.lru_cache(maxsize=4)

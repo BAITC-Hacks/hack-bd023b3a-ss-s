@@ -3,7 +3,8 @@
    Pure module: no DOM, no storage (live.js owns both). What the MODEL produces -- tactic
    names, advice, explanation templates -- is deliberately NOT here: it comes from the
    reviewed YAML sources (taxonomy, advice_{ru,kk}.yaml, templates_{ru,kk}.yaml) through
-   core/qorgan-config.json, and exists in ru/kk only; `contentLocale` maps `en` onto `ru`.
+   core/qorgan-config.json, and exists in ru/kk/en (ADR D52); `contentLocale` returns the
+   chosen locale when the reviewed YAML covers it, and falls back to `DEFAULT_LOCALE` otherwise.
 
    Conventions (enforced by tests_js/i18n.test.mjs):
    - every locale has exactly the keys of `ru`, none empty, with the same `{placeholders}`;
@@ -16,7 +17,7 @@
 export const LOCALES = Object.freeze(["kk", "ru", "en"]); // display order (state language first)
 export const DEFAULT_LOCALE = "ru";
 export const STORAGE_KEY = "qorgan.locale";
-export const CONTENT_LOCALES = Object.freeze(["ru", "kk"]); // what the YAML sources exist in
+export const CONTENT_LOCALES = Object.freeze(["ru", "kk", "en"]); // what the YAML sources exist in
 // Version of the consent wording (`report.consent*` keys, all locales), sent with every report so
 // the server stores what the citizen agreed to. New wording needs a new version, registered with
 // its digest in src/qorgan/reports/model.py (tests/reports/test_consent_versions.py checks both).
@@ -396,7 +397,7 @@ const en = {
   "call.advice_title": "What to do",
   "call.transcript_label": "Call transcript",
   "call.line_meta": "{language} · {pct}% confident",
-  "call.content_fallback": "Advice and explanations are shown in Russian: they are written and reviewed in Kazakh and Russian only.",
+  "call.content_fallback": "Advice and explanations are shown in Russian.",
 
   "band.low": "Low",
   "band.medium": "Medium",

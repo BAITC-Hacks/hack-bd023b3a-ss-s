@@ -7,8 +7,11 @@ version: 1
 # Deterministic generation seed (also the default fallback for `config.default_seed`).
 seed: 42
 
-# Languages to generate dialogues in. "mixed" = natural Kazakh-Russian code-switching.
-languages: ["ru", "kk", "mixed"]
+# Languages to generate dialogues in. "mixed" = natural Kazakh-Russian code-switching; "en" is
+# English as spoken by a resident of Kazakhstan (local institutions stay local -- ADR D54).
+# English was generated separately via configs/corpus_en.yaml and merged, so that adding it did
+# not regenerate ru/kk/mixed; it is listed here so a full regeneration reproduces the corpus.
+languages: ["ru", "kk", "mixed", "en"]
 
 # Which model route to use for bulk generation: "quality" (gemini-2.5-pro, higher fidelity)
 # or "bulk" (gemini-2.5-flash, cheaper/faster -- the default for large-batch synthesis).

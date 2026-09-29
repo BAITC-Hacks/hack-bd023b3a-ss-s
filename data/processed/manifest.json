@@ -8,39 +8,42 @@
   },
   "counts": {
     "train": {
-      "total": 1642,
-      "scam": 724,
-      "legit": 918,
-      "hard_negatives": 918,
-      "positives": 724,
+      "total": 1880,
+      "scam": 896,
+      "legit": 984,
+      "hard_negatives": 984,
+      "positives": 896,
       "by_language": {
         "ru": 532,
         "kk": 574,
-        "mixed": 536
+        "mixed": 536,
+        "en": 238
       }
     },
     "val": {
-      "total": 112,
-      "scam": 43,
-      "legit": 69,
-      "hard_negatives": 69,
-      "positives": 43,
+      "total": 135,
+      "scam": 58,
+      "legit": 77,
+      "hard_negatives": 77,
+      "positives": 58,
       "by_language": {
         "ru": 44,
         "mixed": 38,
-        "kk": 30
+        "kk": 30,
+        "en": 23
       }
     },
     "test": {
-      "total": 115,
-      "scam": 64,
-      "legit": 51,
-      "hard_negatives": 51,
-      "positives": 64,
+      "total": 143,
+      "scam": 83,
+      "legit": 60,
+      "hard_negatives": 60,
+      "positives": 83,
       "by_language": {
         "ru": 37,
         "kk": 39,
-        "mixed": 39
+        "mixed": 39,
+        "en": 28
       }
     },
     "authored_heldout": {
@@ -56,10 +59,10 @@
       }
     }
   },
-  "total": 1911,
-  "content_hash": "0dff87937603316427ae8ed6487c329f9c60d5f4d10bfdd8bd3d9255dccf6654",
+  "total": 2200,
+  "content_hash": "d61b92a0d8929f56e551c8d1b19c00b4f911fa8f3d3830a2807552390b5d245b",
   "train_augment_count": 221,
-  "train_asr_style_count": 821,
+  "train_asr_style_count": 940,
   "dropped_corrupted": [
     "neg_legit_bank_call_mixed_13",
     "neg_legit_bank_call_mixed_16",

@@ -16,7 +16,7 @@ def test_defaults_with_empty_env():
     assert cfg.risk_threshold_enter == 0.59
     assert cfg.risk_threshold_exit == 0.49
     assert cfg.default_seed == 42
-    assert cfg.supported_locales == ("ru", "kk")
+    assert cfg.supported_locales == ("ru", "kk", "en")
     assert cfg.default_locale == "ru"
     assert cfg.llm_model_quality == "gemini-2.5-pro"
     assert cfg.llm_model_bulk == "gemini-2.5-flash"

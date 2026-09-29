@@ -5,6 +5,11 @@ built by `build_corpus` (which scrubs), others are generated or repaired by sepa
 (`ood`, `adversarial*`, `shift`) -- one of them reached the Hub with an unscrubbed IIN. The
 guard makes the invariant explicit: every published utterance must already be a
 `scrub_text` fixed point, or nothing is uploaded.
+
+`scrub_file` is the repair that establishes that invariant, so finding and fixing cannot
+drift apart. It reuses `build_corpus.scrub_dialogue`, which also re-grounds trigger spans
+and drops any span that *was* the PII -- a split must never ship a highlight pointing at
+`[IIN]`.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from qorgan.data.schema import Dialogue
 from qorgan.data.scrub import scrub_text
 
 PUBLISHED_SPLITS: tuple[str, ...] = (
@@ -51,3 +57,64 @@ def find_unscrubbed(paths: Iterable[Path]) -> list[Finding]:
                 if scrub_text(text) != text:
                     findings.append(Finding(path.name, str(dialogue.get("id")), index))
     return findings
+
+
+def scrub_file(path: Path) -> list[Finding]:
+    """Rewrite `path` so every utterance is a `scrub_text` fixed point; return what was fixed.
+
+    A missing file, or one that is already a fixed point, is left completely untouched (no
+    rewrite, so a clean corpus never churns and the call is idempotent). Rows are re-serialised
+    canonically, exactly as `build_corpus` writes a split.
+
+    Raises `ValueError` if a line is not a valid `Dialogue`: a split we cannot parse is a split
+    we must not silently publish. The message names the file and line, never their content.
+    """
+    from qorgan.data.build_corpus import scrub_dialogue  # local: keeps the gate's imports light
+
+    findings = find_unscrubbed([path])
+    if not findings:
+        return []
+
+    repaired: list[str] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            dialogue = Dialogue.model_validate(json.loads(line))
+        except Exception as exc:  # noqa: BLE001 -- re-raised with position, without content
+            raise ValueError(f"{path.name} line {number} is not a valid Dialogue") from exc
+        repaired.append(scrub_dialogue(dialogue).model_dump_json())
+
+    path.write_text("\n".join(repaired) + "\n", encoding="utf-8")
+    return findings
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Report, or with `--fix` repair, the published splits (ADR D45; default: the real ones)."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="PII gate for the published dataset (ADR D45).")
+    parser.add_argument("paths", nargs="*", type=Path, help="defaults to data/processed + data/augment")
+    parser.add_argument("--fix", action="store_true", help="rewrite offending rows via scrub_dialogue")
+    args = parser.parse_args(argv)
+
+    paths = args.paths or (
+        [Path("data/processed") / name for name in PUBLISHED_SPLITS]
+        + sorted(Path("data/augment").glob("*.jsonl"))
+    )
+    findings = find_unscrubbed(paths)
+    for finding in findings:
+        verb = "fixed" if args.fix else "is not scrubbed"
+        print(f"{finding.file} {finding.dialogue_id} utterance {finding.utterance_index} {verb}")
+    if args.fix:
+        for path in paths:
+            scrub_file(path)
+        print(f"repaired {len(findings)} utterance(s); re-run the eval for any split that changed")
+    elif findings:
+        raise SystemExit(f"{len(findings)} unscrubbed utterance(s); re-run with --fix")
+    else:
+        print(f"{len(paths)} path(s) checked, all clean")
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    main()

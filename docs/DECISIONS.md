@@ -1008,3 +1008,280 @@ can carry a number) — the top open privacy item; it needs Python + JS parity a
 measurement before it can change what the model trained on. The audit/access-log retention
 period is a legal decision (LEGAL_ASSESSMENT §6). The Streamlit harness still stores reports
 without a consent version (dev tool, D4).
+
+### D50 — The publish gate gains its repair; the Hub's unscrubbed IIN is fixed (2026-09-27)
+D45 made the invariant explicit — every published utterance must already be a `scrub_text`
+fixed point — but shipped only the *gate*. There was no tool to establish it: `hf_upload.py`
+refused the upload and named a **function** (`build_corpus.scrub_dialogue`), leaving the
+operator to hand-edit a split, which is how the row got published in the first place. Finding
+without fixing is half an invariant.
+
+**The row.** `ood.jsonl`, `ood_neg_legit_gov_service_ru_1`, utterance 1: a legitimate
+ЦОН/eGov caller reads back a fabricated 12-digit IIN (`is_hard_negative`, risk 0.02) — the
+exact file the guard's own docstring names. It is also the live public copy on the Hub, so
+legal gap **M11** was real and not merely local. `ood.jsonl` is a July artifact with no live
+producer (repaired by hand per D34), so there is no generator to correct: the data plus the
+gate *is* the complete remediation.
+
+**The repair.** `publish_guard.scrub_file(path)` reuses `build_corpus.scrub_dialogue`, so
+trigger spans are re-grounded and a span that *was* the PII is dropped rather than left
+pointing at `[IIN]` (the schema's verbatim invariant). It leaves a file that is already a fixed
+point completely untouched — no rewrite, so a clean corpus never churns and the call is
+idempotent — and raises on a line that is not a valid `Dialogue`, because a split we cannot
+parse is one we must not silently publish. `python -m qorgan.data.publish_guard` reports and
+exits non-zero; `--fix` repairs. `hf_upload.py`'s refusal now names that command.
+
+**Measured cost: none.** The repaired utterance moves the dialogue from 0.0324 to 0.0391 on the
+onnx proxy against a 0.59 threshold, so it cannot change a decision. Split-level `ood` after
+the fix: recall **0.932** (unchanged), FPR 0.014 [0.000, 0.073] — and the single false positive
+is `ood_neg_legit_bank_call_mixed_3` at 0.714, the pre-existing server-proxy artifact already
+recorded in D31 (0.67 server / 0.15 browser), not this row. Exactly one line of `ood.jsonl`
+changed; the other 117 are byte-identical. Numbers are the onnx proxy, not the device backend
+the headline uses — the device restatement needs `npm run device:serve` and is not required
+here, since the decision margin is ~0.55.
+
+**Still open.** The Hub copy is unchanged: republishing is outward-facing and needs sign-off,
+and M11 also asks for a `LICENSE` plus HF cards stating "synthetic, no real persons". Until
+then the guard keeps the local corpus honest and blocks any upload.
+
+**Evidence.** Six new tests in `tests/data/test_publish_guard.py` (fixed point, reported
+findings, no-churn, span dropped, idempotent, missing file), written before the implementation;
+`pytest` **1241 passed / 2 skipped** (was 1234 / 1 failed / 2 skipped); `npm test` 60/60.
+
+### D51 — The OTP cue lexicon spelled SMS only in Latin; real Russian and real ASR write «СМС» (2026-09-27)
+Found while probing the shipped lexicon against real-world Russian scam phrasing (the external
+dataset survey, `docs/DATA_SOURCES.md`): the single most canonical real OTP-phishing line,
+«Продиктуйте код из СМС», matched **nothing**. Every SMS cue was Latin-spelled
+(`"код из SMS"`, `"SMS-тегі кодты айтыңыз"`), and `normalize()` correctly keeps the scripts
+distinct (`кодизсмс` ≠ `кодизsms`), so the D39 bounded-edit matcher cannot bridge it — a script
+change is not an edit-distance problem.
+
+**Rejected alternative.** Folding Latin↔Cyrillic homoglyphs inside `normalize()` would have
+invalidated `MATCHER_VERSION` and therefore every trained cue feature, and it would not even
+work: `SMS` → `СМС` is *acronym transliteration*, while homoglyph folding maps Cyrillic `С` to
+Latin `C`, not `S`. A lexicon variant is the honest fix, and the file already has a documented
+slot for it (`# ASR form`).
+
+**Live, not hypothetical.** In `data/asr_capture/`, `secrecy_mixed_3#6` was decoded correctly by
+Vosk except for the script — «код из смс» — and lost its `otp_request` cue, so the 61/81
+hard-signal floor never armed. Corpus-wide, **53 positive rows** voiced a request-shaped
+«код из СМС» while firing zero OTP cues (46 `train`, 3 `test`, 2 `val`, 2 `ood`).
+
+**The change, measured per candidate.** `"код из СМС"`: +36 positives, +6 negative rows (3 unique
+dialogues plus their ASR-styled copies). `"код из пуш"` / `"код из пуш-уведомления"`: **+0 / +0**,
+so not added — the same bug class with no instances is not worth the surface. The two Cyrillic
+**KK** forms also gain +0 today and were added anyway, deliberately: the cue flag is per *tactic*,
+not per phrase, so the `otp_request` weight is already learned from the Latin-form rows and
+widening what sets the flag has no training-time effect, while closing the identical bug for
+Kazakh ASR output. That is reasoning, not measurement — on record as such.
+
+**Why the 6 negative hits are acceptable.** All are reassurance rows where the sentence is a
+negation («Мы никогда не спросим у вас ПИН-код, CVV или код из СМС»). Cue-hits on legit calls are
+already the status quo, not a new class: **8 of 1,136** negatives fire existing cues (e.g.
+«SMS кодтарын ешкімге айтпаңыз»), and only 4 of those 8 carry the reassurance counter-signal;
+2 of the 3 new ones do. Separately noted: `reg_neg_reassure_legit_bank_call_ru_72` reads as
+textbook reassurance but does not trip the reassurance lexicon — a gap to fix on its own, not
+bundled here, so a gate movement stays attributable.
+
+**No new training data was added**, because the 38 rows that gain the cue are existing positives
+whose feature was silently zero. That makes this the lexicon-only shape the July sprint lesson
+warns about, and the predicted symptom duly appeared (below).
+
+**Results** (device backend, threshold 0.59, ADR D33 methodology):
+`test` FPR 0.000 / recall **0.984 → 1.000** · `authored_heldout` 0.000 / 0.889 held ·
+`ood` 0.000 / 0.932 held · `shift` 0.061 / 0.364 and `shift (clean)` 0.000 / 0.364 held.
+Streaming: `test` false-latch 3/51 held and alert-hit **62/64 → 63/64**; `authored` false-latch
+**3/24 → 2/24**, clean 1/19 held, alert-hit **15/18 → 16/18**. The three `test` positives that
+were losing the hard signal are exactly the ones recovered.
+
+**Cost, on record.** ASR-styled `ood` FPR **0.000 → 0.014** (1/74): `ood_neg_legit_bank_call_mixed_3`,
+clean 0.132 → styled 0.612. **No cue fires on that row at all** — clean or styled, old lexicon or
+new — so the joint-LR refit moved it, precisely the effect the July lesson describes. It is not
+fixed with data, because it is an eval-split row and targeting it would be tuning on held-out
+data. It is also the row D31 already recorded as the corpus's weakest negative (0.67 server /
+0.15 browser); it is now in the inspection ledger, so the split reports `ood (clean)` beside the
+full row. Styled `test` and `authored` FPR stay 0.000, and cue/reassurance survival is 11/11,
+13/13, 10/10 and 5/5, 9/9, 6/6.
+
+**Ledger.** Two `ood` rows were read during this work and are recorded (ADR D43 treatment):
+`ood_neg_legit_gov_service_ru_1` (read only to repair the published IIN, D50) and
+`ood_neg_legit_bank_call_mixed_3` (read to attribute the movement above).
+
+**Rollback.** `models/linear_d50_rollback` (device-trained, pre-D51 lexicon; it hash-checks the
+lexicon, so it must be restored together with the old YAML).
+
+**Evidence.** `pytest` **1241 passed / 2 skipped**; `npm test` **60/60**; `weights.json`, the
+parity, runtime-gate and scrub fixtures regenerated; corpus rebuilt with an unchanged
+`content_hash` (the lexicon does not alter corpus content).
+
+### D52 — English becomes a reviewed content locale, not an alias for Russian (2026-09-27)
+The citizen page has offered English chrome since D47, but only the chrome: `CONTENT_LOCALES`
+was `["ru", "kk"]` and `contentLocale` mapped `en` onto `ru`, so an English-speaking user read
+English buttons and then **Russian** tactic names, advice, explanations and summary, under a
+notice admitting it. The seam was already named in the code; this closes it.
+
+**Scope, deliberately narrow.** This is the *content* layer only. `SupportedLanguage`
+(`ru|kk|mixed`) is the **corpus** enum and is untouched: the language a call is spoken in and
+the language its explanation is rendered in are independent axes, and English scam *data* is a
+separate piece of work. Nothing about the model, the lexicons or the corpus changes here, so no
+retrain and no eval movement — the risk head is byte-identical.
+
+**What changed.** `explain/templates_en.yaml` and `explain/advice_en.yaml` (all 15 tactics,
+verification questions, low-confidence note), an `en:` display name per tactic in
+`data/taxonomy/tactics.yaml`, `TacticDefinition.en` with `display_name` dispatching on the
+locale code, `_SUPPORTED_LOCALES` and `_DEFAULT_SUPPORTED_LOCALES` gaining `en`, and
+`QORGAN_SUPPORTED_LOCALES=ru,kk,en` in `.env.example`. On the client, `CONTENT_LOCALES` gains
+`en`; `contentLocale` needed no logic change because it was already generic.
+
+**Kazakhstani, in English.** The advice keeps the local institutions and glosses them —
+"IIN (your national ID number)", "the regulator (ARDFM)" — because the reader is an English
+speaker *in Kazakhstan*, not a generic English audience.
+
+**A string that would have become a lie.** `call.content_fallback` told English users that
+advice "is shown in Russian: they are written and reviewed in Kazakh and Russian only". The
+notice now never renders for a shipped locale (it is `hidden` whenever `locale === contentLocale`),
+but the trailing clause was false in a shipped bundle, so it was removed. The mechanism is kept:
+it is correct defensive behaviour for any future chrome-only locale.
+
+**Not changed, on purpose.** `pickLocale` still only auto-selects `kk` or `ru` from the browser
+language, so an English browser still *starts* in Russian and the user picks ENG. That looked
+like a deliberate choice in D47 rather than an oversight, and reversing a default is a product
+decision, not a content one. Worth an explicit answer now that English is complete.
+
+**Tests.** The locale-coverage tests are parametrised over `ru/kk/en` (advice covers every
+taxonomy id; every locale's templates are complete), plus a new test that each tactic has three
+*distinct* display names, so English can never silently become an alias again. Four tests used
+`"en"` as their example of an *unsupported* locale and now use `"de"` — the intent is preserved,
+only the example moved. The i18n unit test asserts `contentLocale("en") === "en"` and that an
+uncovered locale still falls back.
+
+**Evidence.** `pytest` **1246 passed / 2 skipped**; `npm test` **60/60**; the live i18n
+end-to-end suite passes in real Chrome (`node tests_js/tools/e2e_live_i18n.mjs`, scenes A/B/C),
+updated to assert the reviewed English summary note and English review chips and the **absence**
+of the fallback notice. Verified visually in the browser: verdict band, all eight tactic chips
+and the advice render in English while the Russian call transcript stays Russian with its
+trigger spans highlighted.
+
+### D53 — The shared Gemini seam gets a wall-clock deadline; generation retries (2026-09-27)
+Adding English (D54) meant a first generation run since the CLIs were written, and it **hung
+for 83 minutes at 0 % CPU with an empty output file** before being killed. The cause was
+already written down in this repo: D38 hardened the *classifier's* client because "httpx's
+read timeout is the gap between bytes, so a socket that stays ESTABLISHED while the server
+sends nothing never trips it (observed: 40-minute hangs)". That fix lived in
+`classifier/llm_classifier.py`. The **generate and label CLIs go through the same
+`llm_tools.generate_json` and never got it** — they had only the 120 s transport timeout that
+D38 says is insufficient.
+
+**Fixed at the shared seam, not per caller.** `generate_json` now runs the SDK call on a worker
+and abandons it after `deadline_s` wall-clock seconds (default 180), raising `TimeoutError`.
+Deliberately *not* a `with ThreadPoolExecutor(...)` block: its `__exit__` joins the worker,
+which is precisely the hang being escaped — the first implementation passed its test only
+after 30 s for that reason. A thread blocked in a socket read cannot be cancelled, so it is
+abandoned and ends when its socket does; it holds no state we keep. Every caller is now
+covered, including `label.py`, which had the same exposure and no test.
+
+**A batch must survive one bad socket.** `generate._call_tool` retries `TimeoutError` and
+`LLMResponseError` (a truncated or unparseable payload — a fresh sample usually fixes it) up
+to 3 times with linear backoff, then raises `GenerationError` naming the cause. Before this, a
+single blip discarded every dialogue generated so far: `generate_batch` accumulates in memory
+and writes only at the end, so failure at call 169 of 170 lost all 169.
+
+**Verified, not assumed.** After the fix a live single call answered in **1.1 s**, so the
+83-minute stall was a genuine silent socket and not a broken key or endpoint.
+
+**Then it happened again, differently.** The retry caught `TimeoutError` and
+`LLMResponseError` only, so the next run died on `httpx.ReadError: Connection reset by peer`
+after ~10 minutes — and because `generate_batch` accumulated in memory and wrote once at the
+end, the whole batch was lost a *second* time. Two fixes, both at the shared seam:
+`llm_tools.is_transient` (moved out of `llm_classifier`, which now delegates to it, so
+"transient" means one thing across the classifier and both CLIs) already covered
+`httpx.HTTPError`; and `generate_batch` gained a `sink` callback plus `skip_ids`, so the CLI
+appends and flushes each dialogue as it is produced and re-running **resumes** from what is
+already on disk. A dropped connection now costs one dialogue, not a run.
+
+**`label.py` had the same two holes and was fixed before it could bite.** Labelling is the
+*next* few-hundred-call pass over the same seam: it had no retry at all (only `LLMResponseError`
+converted to `LabelingError`) and `main` wrote once at the end. It now retries transient
+failures and appends/resumes exactly as generation does. Fixing it pre-emptively rather than
+after a third lost run is the point of writing the failure down.
+
+**Evidence.** New `tests/test_llm_tools.py` (the seam had no tests at all): the deadline fires
+on a client that never answers and returns in well under 10 s, a normal call still returns,
+and an unparseable payload is still `LLMResponseError`. Plus two generation tests: a transient
+failure is retried, and exhausted retries raise loudly rather than yielding a short corpus.
+`pytest` 1250 passed / 2 skipped.
+
+### D54 — English becomes a third call language; what it fixed, and what it exposed (2026-09-28)
+D52 made English a reviewed *content* locale (the UI and the explanations). This makes it a
+**call** language (the third: ru, kk, en — `mixed` is kk/ru code-switching, not a separate
+language): `SupportedLanguage` gains `en`, and the corpus gains 170 English dialogues
+(120 positive / 50 hard negative, all 15 tactics), generated through the existing Gemini
+pipeline with a language instruction that keeps the setting local — "Kaspi, Halyk, eGov, tenge,
+IIN; only the language is English". 168 of 170 carry a Kazakhstani marker, so this is
+**Kazakhstan in English**, not a US corpus.
+
+**Generated separately, on purpose.** `configs/corpus_en.yaml` writes its own file and
+`scripts/merge_synthetic.py` merges by id, so adding a language did not regenerate ru/kk/mixed
+and invalidate every number in this report. `configs/corpus.yaml` lists `en` so a full
+regeneration still reproduces the corpus.
+
+**Cues: measured one at a time, and two were rejected on evidence.** Candidates were derived
+from `train` only. `"your IIN"` fires on **20 legitimate calls** and `"confirm your IIN"` on 3 —
+the bare-mention trap the lexicon's own invariant warns about — so both were rejected in favour
+of request-shaped forms. `"the code"` and `"a one-time code"` measured **0** false hits and were
+*still* rejected: our English negatives contain **zero** reassurance language, so the corpus
+cannot reveal that risk. A clean measurement over a blind spot is not evidence.
+
+**A language-independent bug found along the way.** `AnyDesk` was a `remote_access` cue;
+**`TeamViewer` never was** — although the comment beside it names TeamViewer and the corpus uses
+it 35 times across ru/kk/mixed/en. Adding it helps Russian and Kazakh, not just English.
+
+**Re-labelling was overruling a structural label.** A hard negative is legitimate *by
+construction*, but `label.py` let the model overwrite that: on a legitimate bank call verifying
+an identity it returns risk 1.0 with tactic tags — **32 of 50** English negatives came back
+tagged, one at risk 1.000. The existing ru/kk corpus is clean only because the historical run
+relabelled positives only; the protection was a property of how it was run, not of the code.
+`_build_label` now returns the structural label for hard negatives (see the commit).
+
+**Results** (device backend, threshold 0.59):
+`test` FPR 0.000 / recall **1.000** (n=143, English included) · per language all four at
+0.000 / 1.000 · `authored_heldout` 0.000 / 0.889 and `ood` 0.000 / 0.932, both unchanged ·
+**`shift` 0.061 → 0.030 FPR and 0.364 → 0.455 recall.** State this carefully: the intervals
+overlap heavily (0.364 [0.204, 0.549] → 0.455 [0.281, 0.636], 12/33 → 15/33), it is a single
+run, and **three things changed together** — English training data, the `TeamViewer` cue, and
+the retrain itself. So this is a co-occurrence worth recording, not a demonstrated effect of
+adding a language; isolating it needs an ablation we have not run. Styled FPR: test and authored 0.000, `ood`
+0.014 — unchanged from D51, not a new regression. Streaming: test false-latch 3/60, alert-hit
+0.988; authored clean 1/19 unchanged, inspected 1/5 → 2/5 (cost, on record).
+
+**The honest caveat, and it is a big one.** English has **no `authored_heldout` anchors and no
+`shift` split**, so its 1.000 shares a generator with its training data — exactly the weakness
+D35 exists to expose. Measured against an independent generator
+(`BothBosu/scam-dialogue`, Apache-2.0, evaluation only):
+
+| English probe | before English training | after |
+|---|---|---|
+| recall | 0.475 | **0.739** |
+| FPR | 0.078 | **0.227** |
+
+Recall improved everywhere (refund 0.094 → 0.394, reward 0.225 → 0.606, ssn → 1.000, support
+0.631 → 0.956). **But FPR tripled**, and FPR is the primary metric. Diagnosed rather than
+guessed: the 145 false positives are **entirely insurance (66) and telemarketing (79)** — pushy
+but legitimate sales calls — and **not one of the new cues fired on any of them**. The cues are
+innocent; the model has simply never seen a legitimate hard-sell call in English. Our 50
+English negatives cover delivery, family, chit-chat, bank and e-gov, with no sales register and
+no reassurance language at all.
+
+**Therefore: English is not at Russian/Kazakh quality and must not be presented as if it were.**
+The fix is known and scoped — English negatives in the pushy-sales and insurance registers,
+~40 % of them carrying the reassurance counter-signal, exactly as D27/D42 did for ru/kk. A first
+attempt stalled on repeated silent sockets (the API throttles after a burst and the connections
+hang rather than returning 429), and because
+`augment_register_diversity.py` still writes once at the end, that batch was lost. Note the
+probe's own limit: its legitimate calls are US-register, so some of that 0.227 is a distribution
+we do not serve — but the reassurance and sales-register gaps are real regardless.
+
+**Tooling.** `--languages` on both augmentation scripts (they hardcoded `ru/kk/mixed`), and
+`--tag` on `augment_register_diversity.py`, because an untagged rerun **overwrites the committed
+ru/kk/mixed batch** — caught before running it, not after.
+

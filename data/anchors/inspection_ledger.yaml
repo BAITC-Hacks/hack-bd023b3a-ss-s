@@ -27,3 +27,12 @@ entries:
   - id: shift_legit_kk_11
     inspected_on: 2026-09-24
     reason: the false positive register diversity added, at 0.623 (ADR D42); a pushy but legitimate bank deposit sales call. Examined and deliberately NOT fixed with data -- sales-flavoured calls are already 40% of train negatives, so generating more would be fitting to this row
+  # `ood` rows read on 2026-09-27: one to fix published PII (D50), one to attribute a gate
+  # movement (D51). Same split-agnostic treatment (ADR D43).
+  - id: ood_neg_legit_gov_service_ru_1
+    inspected_on: 2026-09-27
+    reason: carried an unscrubbed fabricated IIN that reached the Hub; read only to repair it (ADR D50). Scores 0.039 after scrubbing -- never near the threshold
+  - id: ood_neg_legit_bank_call_mixed_3
+    inspected_on: 2026-09-27
+    reason: the ASR-styled false positive at 0.612 after the D51 retrain (clean 0.132); read to attribute the movement, which turned out to be the joint-LR refit and not the new cues -- no cue fires on it at all. Deliberately NOT fixed with data -- it is an eval-split row, so targeting it would be tuning on held-out data
+

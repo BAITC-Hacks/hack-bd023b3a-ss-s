@@ -25,7 +25,7 @@ _findings = find_unscrubbed(
 if _findings:
     for f in _findings:
         print(f"PII gate: {f.file} {f.dialogue_id} utterance {f.utterance_index} is not scrubbed", file=sys.stderr)
-    sys.exit("refusing to publish: fix the rows above (qorgan.data.build_corpus.scrub_dialogue)")
+    sys.exit("refusing to publish: run `python -m qorgan.data.publish_guard --fix`, then re-run the eval")
 
 api = HfApi()
 
