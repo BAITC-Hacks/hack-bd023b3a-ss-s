@@ -112,7 +112,7 @@ def test_load_corpus_config_unknown_language_raises(tmp_path):
         """
 version: 1
 seed: 1
-languages: ["en"]
+languages: ["de"]
 model_route: bulk
 dialogues_per_tactic: 1
 hard_negatives_per_category: 1
@@ -296,3 +296,103 @@ def test_write_dialogues_jsonl_round_trips(tmp_path):
     assert len(lines) == 1
     round_tripped = Dialogue.model_validate_json(lines[0])
     assert round_tripped == dialogue
+
+
+# --- transient-failure resilience (ADR D53) ------------------------------------------------
+
+
+class FlakyModels:
+    """Fails `failures` times with a transient error, then answers."""
+
+    def __init__(self, failures: int, response):
+        self.remaining = failures
+        self._response = response
+        self.calls = 0
+
+    def generate_content(self, **_kwargs):
+        self.calls += 1
+        if self.remaining > 0:
+            self.remaining -= 1
+            raise TimeoutError("Gemini call exceeded the 180 s deadline")
+        return self._response
+
+
+class FlakyClient:
+    def __init__(self, failures: int, response):
+        self.models = FlakyModels(failures, response)
+
+
+def test_generate_dialogue_retries_a_transient_failure():
+    """A 170-call batch must survive one slow socket, not lose every prior dialogue."""
+    cfg = load_corpus_config()
+    client = FlakyClient(2, _tool_response(VALID_DIALOGUE_PAYLOAD))
+
+    dialogue = generate_dialogue("otp_request", "ru", client=client, cfg=cfg)
+
+    assert isinstance(dialogue, Dialogue)
+    assert client.models.calls == 3, "two failures, then the answer"
+
+
+def test_generate_dialogue_gives_up_loudly_after_repeated_failures():
+    """Exhausted retries raise, naming the failure -- a short corpus must never pass silently."""
+    cfg = load_corpus_config()
+    client = FlakyClient(99, _tool_response(VALID_DIALOGUE_PAYLOAD))
+
+    with pytest.raises(GenerationError):
+        generate_dialogue("otp_request", "ru", client=client, cfg=cfg)
+
+
+def test_generate_batch_streams_each_dialogue_to_a_sink(tmp_path):
+    """A long run must persist as it goes: two runs were lost to end-of-batch writes (D53)."""
+    small = tmp_path / "small.yaml"
+    small.write_text(
+        """
+version: 1
+seed: 1
+languages: ["en"]
+model_route: bulk
+dialogues_per_tactic: 1
+hard_negatives_per_category: 1
+min_utterances: 2
+max_utterances: 5
+output_path: data/synthetic/x.jsonl
+""",
+        encoding="utf-8",
+    )
+    cfg = load_corpus_config(small)
+    client = FakeClient([_tool_response(VALID_DIALOGUE_PAYLOAD)])
+    seen: list[str] = []
+
+    dialogues = generate_batch(cfg, client=client, sink=lambda d: seen.append(d.id))
+
+    assert seen == [d.id for d in dialogues], "the sink sees every dialogue, in order"
+    assert len(seen) == 15 + 5
+
+
+def test_generate_batch_skips_ids_already_generated(tmp_path):
+    """Resume: ids already on disk are not regenerated, so a crashed run continues."""
+    small = tmp_path / "small2.yaml"
+    small.write_text(
+        """
+version: 1
+seed: 1
+languages: ["en"]
+model_route: bulk
+dialogues_per_tactic: 1
+hard_negatives_per_category: 1
+min_utterances: 2
+max_utterances: 5
+output_path: data/synthetic/x.jsonl
+""",
+        encoding="utf-8",
+    )
+    cfg = load_corpus_config(small)
+    client = FakeClient([_tool_response(VALID_DIALOGUE_PAYLOAD)])
+    everything = generate_batch(cfg, client=client)
+    already = {d.id for d in everything[:5]}
+
+    client2 = FakeClient([_tool_response(VALID_DIALOGUE_PAYLOAD)])
+    rest = generate_batch(cfg, client=client2, skip_ids=already)
+
+    assert {d.id for d in rest} == {d.id for d in everything} - already
+    assert len(client2.models.calls) == len(everything) - len(already), "skipped ids cost no calls"

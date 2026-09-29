@@ -125,7 +125,7 @@ def test_unknown_confidence_is_not_softened():
 
 def test_unsupported_locale_raises():
     with pytest.raises(AdviceError):
-        recommend([TacticTag(id="urgency", weight=0.5)], "en")
+        recommend([TacticTag(id="urgency", weight=0.5)], "de")
 
 
 def test_missing_advice_file_raises(tmp_path):
@@ -141,7 +141,7 @@ def test_advice_file_missing_required_key_raises(tmp_path):
         load_advice("ru", advice_dir=tmp_path)
 
 
-@pytest.mark.parametrize("locale", ["ru", "kk"])
+@pytest.mark.parametrize("locale", ["ru", "kk", "en"])
 def test_every_taxonomy_tactic_has_advice(locale):
     """Coverage invariant: a detected tactic must never lack localized advice."""
     templates = load_advice(locale)

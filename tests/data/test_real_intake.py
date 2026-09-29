@@ -96,7 +96,7 @@ def test_labeler_must_declare_no_lexicon_authorship(tmp_path):
     "bad",
     [
         {"label": "maybe"},
-        {"language": "en"},
+        {"language": "de"},
         {"tactic_ids": "not_a_tactic"},
         {"transcript_file": "transcripts/missing.txt"},
         {"transcript_file": "", "audio_file": ""},

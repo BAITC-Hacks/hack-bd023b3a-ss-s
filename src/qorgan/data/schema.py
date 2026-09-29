@@ -24,7 +24,15 @@ from qorgan.privacy.numbers import is_number_hash
 # corpus transcripts stay byte-for-byte consistent.
 UTTERANCE_JOIN = "\n"
 
-SupportedLanguage = Literal["ru", "kk", "mixed"]
+# A labeled risk at or above this is a scam, below it legit -- the one ground-truth cut used
+# by training, evaluation and the corpus manifest (a hard negative is a *kind* of legit call).
+SCAM_RISK_THRESHOLD = 0.5
+
+# A hard negative is a legitimate call by construction: generation assigns this risk, and
+# re-labelling must not raise it (the model does not get a vote on a label that is structural).
+HARD_NEGATIVE_RISK = 0.02
+
+SupportedLanguage = Literal["ru", "kk", "mixed", "en"]
 FeedbackState = Literal["confirmed", "dismissed", "merged"]
 
 
@@ -140,6 +148,10 @@ class Label(BaseModel):
     tactic_tags: tuple[TacticTag, ...] = ()
     trigger_spans: tuple[Span, ...] = ()
     is_hard_negative: bool = False
+
+    @property
+    def is_scam(self) -> bool:
+        return self.risk >= SCAM_RISK_THRESHOLD
 
 
 class Dialogue(BaseModel):

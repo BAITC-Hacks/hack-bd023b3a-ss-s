@@ -46,9 +46,19 @@ from qorgan.data.generate import (  # noqa: E402
 from qorgan.llm_tools import build_client  # noqa: E402
 from qorgan.taxonomy import get_taxonomy  # noqa: E402
 
-OUTPUT = REPO_ROOT / "data" / "augment" / "register_diversity.jsonl"
-OUTPUT_NEGATIVES = REPO_ROOT / "data" / "augment" / "register_diversity_negatives.jsonl"
-MANIFEST = REPO_ROOT / "data" / "augment" / "register_diversity.manifest.json"
+AUGMENT_DIR = REPO_ROOT / "data" / "augment"
+
+
+def _outputs(tag: str = "") -> tuple[Path, Path, Path]:
+    """Output paths, optionally tagged. A tagged run writes its OWN files: an untagged rerun
+    overwrites the committed ru/kk/mixed batch, so a language top-up must not share them
+    (ADR D54). `build_corpus` globs `data/augment/*.jsonl`, so tagged files are picked up."""
+    suffix = f"_{tag}" if tag else ""
+    return (
+        AUGMENT_DIR / f"register_diversity{suffix}.jsonl",
+        AUGMENT_DIR / f"register_diversity{suffix}_negatives.jsonl",
+        AUGMENT_DIR / f"register_diversity{suffix}.manifest.json",
+    )
 
 # Each axis is sampled independently, so the prompt differs every call. The point is not
 # realism in any single axis but VARIANCE: the corpus's own register is one point in here.
@@ -132,6 +142,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--negatives", type=int, default=60, help="hard negatives in the same registers")
     parser.add_argument("--reassurance-share", type=float, default=0.4,
                         help="fraction of negatives that also carry the fraud-safety reassurance (ADR D27)")
+    parser.add_argument(
+        "--languages", nargs="+", default=None,
+        help="restrict to these languages (default: every language in corpus.yaml). "
+             "English-only top-ups use this so ru/kk/mixed are not regenerated (ADR D54).",
+    )
+    parser.add_argument(
+        "--tag", default="",
+        help="write to register_diversity_<tag>*.jsonl instead of the shared files",
+    )
     parser.add_argument("--seed", type=int, default=20260924)
     parser.add_argument("--dry-run", action="store_true", help="print one sampled prompt and exit")
     args = parser.parse_args(argv)
@@ -140,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     corpus_cfg = load_corpus_config()
     taxonomy = get_taxonomy()
     rng = random.Random(args.seed)
-    languages = list(corpus_cfg.languages)
+    languages = list(args.languages) if args.languages else list(corpus_cfg.languages)
 
     if args.dry_run:
         print(style_for(rng, scam=True))
@@ -188,11 +207,16 @@ def main(argv: list[str] | None = None) -> int:
             continue
         negatives.append(scrub_dialogue(dialogue))
         print(f"  neg   {category.id:32s} {language:5s} {len(dialogue.utterances)} turns", flush=True)
+        with _outputs(args.tag)[1].open("a", encoding="utf-8") as _partial:
+            _partial.write(dialogue.model_dump_json() + "\n")  # crash-safe partial (ADR D54)
+            _partial.flush()
 
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    write_dialogues_jsonl(scams, OUTPUT)
-    write_dialogues_jsonl(negatives, OUTPUT_NEGATIVES)
-    MANIFEST.write_text(json.dumps({
+    AUGMENT_DIR.mkdir(parents=True, exist_ok=True)
+    output, output_negatives, manifest_path = _outputs(args.tag)
+    if scams:
+        write_dialogues_jsonl(scams, output)
+    write_dialogues_jsonl(negatives, output_negatives)  # final, canonical write
+    manifest_path.write_text(json.dumps({
         "purpose": "register diversity for TRAIN (ADR D35 follow-up): same generator, widened prompting",
         "seed": args.seed,
         "model": cfg.llm_model_bulk,
@@ -203,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         "axes": {"caller": len(CALLER_STYLE), "callee": len(CALLEE_STYLE), "opening": len(OPENING),
                  "texture": len(TEXTURE), "length": len(LENGTH)},
     }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"\n{len(scams)} scams -> {OUTPUT}\n{len(negatives)} negatives -> {OUTPUT_NEGATIVES}\n{len(failures)} failures")
+    print(f"\n{len(scams)} scams -> {output}\n{len(negatives)} negatives -> {output_negatives}\n{len(failures)} failures")
     return 0
 
 

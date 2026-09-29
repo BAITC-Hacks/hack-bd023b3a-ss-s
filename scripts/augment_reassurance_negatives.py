@@ -43,7 +43,7 @@ _REASSURANCE_STYLE = (
 
 # The institutional categories where proactive reassurance is realistic.
 _REASSURANCE_CATEGORIES = ("legit_bank_call", "legit_gov_service", "delivery_notification")
-_LANGUAGES = ("ru", "kk", "mixed")
+_DEFAULT_LANGUAGES = ("ru", "kk", "mixed")  # --languages overrides (English added in ADR D54)
 
 
 def _generate_one(client, category_id: str, language: str, dialogue_id: str, cfg) -> Dialogue | None:
@@ -64,7 +64,10 @@ def _generate_one(client, category_id: str, language: str, dialogue_id: str, cfg
     return None
 
 
-def generate_reassurance_negatives(*, client, per_cell: int, out_path: Path, cfg=None) -> int:
+def generate_reassurance_negatives(
+    *, client, per_cell: int, out_path: Path, cfg=None,
+    languages: tuple[str, ...] = _DEFAULT_LANGUAGES,
+) -> int:
     """Generate reassurance negatives, appending each to `out_path` as it succeeds (so a
     mid-batch network failure never loses progress). Returns the count written."""
     active_cfg = cfg or load_corpus_config()
@@ -72,7 +75,7 @@ def generate_reassurance_negatives(*, client, per_cell: int, out_path: Path, cfg
     written = 0
     with out_path.open("w", encoding="utf-8") as sink:
         for category_id in _REASSURANCE_CATEGORIES:
-            for language in _LANGUAGES:
+            for language in languages:
                 for i in range(per_cell):
                     dialogue_id = f"reassure_{category_id}_{language}_{i}"
                     dialogue = _generate_one(client, category_id, language, dialogue_id, active_cfg)
@@ -89,12 +92,18 @@ def main(argv=None) -> None:  # pragma: no cover - live network CLI
     parser = argparse.ArgumentParser(description="Generate reassurance hard negatives.")
     parser.add_argument("--per-cell", type=int, default=7, help="Dialogues per (category, language)")
     parser.add_argument(
+        "--languages", nargs="+", default=list(_DEFAULT_LANGUAGES),
+        help="Languages to generate for (default: ru kk mixed)",
+    )
+    parser.add_argument(
         "--out", type=Path, default=get_config().data_dir / "synthetic" / "reassurance_negatives.jsonl"
     )
     args = parser.parse_args(argv)
 
     client = build_client(get_config().gemini_api_key)
-    written = generate_reassurance_negatives(client=client, per_cell=args.per_cell, out_path=args.out)
+    written = generate_reassurance_negatives(
+        client=client, per_cell=args.per_cell, out_path=args.out, languages=tuple(args.languages)
+    )
     print(f"\nwrote {written} reassurance negatives -> {args.out}")
 
 

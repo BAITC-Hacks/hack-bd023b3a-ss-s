@@ -18,12 +18,14 @@ and tests can pass a fake client with no network.
 from __future__ import annotations
 
 import argparse
+import time
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
 
 from qorgan.config import get_config
-from qorgan.data.schema import Dialogue, Label, TacticTag, spans_from_phrases
-from qorgan.llm_tools import LLMResponseError, generate_json, thinking_budget_for
+from qorgan.data.schema import HARD_NEGATIVE_RISK, Dialogue, Label, TacticTag, spans_from_phrases
+from qorgan.llm_tools import LLMResponseError, generate_json, is_transient, thinking_budget_for
 from qorgan.taxonomy import Taxonomy, get_taxonomy
 
 _MAX_TOKENS = 2048
@@ -51,6 +53,9 @@ def _build_system_prompt(taxonomy: Taxonomy) -> str:
         f"- {tactic.id}: {tactic.description}" for tactic in taxonomy.tactics
     ]
     return _SYSTEM_PROMPT_HEADER + "\n" + "\n".join(lines)
+
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_S = 2.0
 
 _RESPONSE_SCHEMA = {
     "type": "object",
@@ -89,18 +94,30 @@ def label_dialogue(dialogue: Dialogue, *, client: Any, model: str | None = None)
     active_model = model or cfg.llm_model_bulk
     transcript = dialogue.transcript()
 
-    try:
-        payload = generate_json(
-            client,
-            model=active_model,
-            prompt=transcript,
-            response_schema=_RESPONSE_SCHEMA,
-            system_instruction=_build_system_prompt(get_taxonomy()),
-            max_output_tokens=_MAX_TOKENS,
-            thinking_budget=thinking_budget_for(active_model),
-        )
-    except LLMResponseError as exc:
-        raise LabelingError(str(exc)) from exc
+    # Labelling a corpus is hundreds of calls; a dropped connection or a truncated payload
+    # must cost one dialogue, not the run (ADR D53, same as generation).
+    last: Exception | None = None
+    payload = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            payload = generate_json(
+                client,
+                model=active_model,
+                prompt=transcript,
+                response_schema=_RESPONSE_SCHEMA,
+                system_instruction=_build_system_prompt(get_taxonomy()),
+                max_output_tokens=_MAX_TOKENS,
+                thinking_budget=thinking_budget_for(active_model),
+            )
+            break
+        except Exception as exc:  # noqa: BLE001 -- re-raised below unless it is transient
+            if not isinstance(exc, LLMResponseError) and not is_transient(exc):
+                raise
+            last = exc
+            if attempt + 1 < _MAX_ATTEMPTS:
+                time.sleep(_RETRY_BACKOFF_S * (attempt + 1))
+    if payload is None:
+        raise LabelingError(f"gave up after {_MAX_ATTEMPTS} attempts: {last}") from last
 
     new_label = _build_label(payload, transcript, is_hard_negative=dialogue.label.is_hard_negative)
     return Dialogue(
@@ -111,9 +128,30 @@ def label_dialogue(dialogue: Dialogue, *, client: Any, model: str | None = None)
     )
 
 
-def label_corpus(dialogues: Any, *, client: Any, model: str | None = None) -> list[Dialogue]:
-    """Re-label every dialogue in `dialogues`, preserving order."""
-    return [label_dialogue(d, client=client, model=model) for d in dialogues]
+def label_corpus(
+    dialogues: Any,
+    *,
+    client: Any,
+    model: str | None = None,
+    sink: Callable[[Dialogue], None] | None = None,
+    skip_ids: Collection[str] = (),
+) -> list[Dialogue]:
+    """Re-label every dialogue in `dialogues`, preserving order.
+
+    `sink` receives each dialogue as it is labelled and `skip_ids` are passed over entirely,
+    so a run that died part-way resumes from what is already on disk rather than paying for
+    the whole corpus again (ADR D53).
+    """
+    already = frozenset(skip_ids)
+    out: list[Dialogue] = []
+    for dialogue in dialogues:
+        if dialogue.id in already:
+            continue
+        labeled = label_dialogue(dialogue, client=client, model=model)
+        out.append(labeled)
+        if sink is not None:
+            sink(labeled)
+    return out
 
 
 def _build_label(payload: dict[str, Any], transcript: str, *, is_hard_negative: bool) -> Label:
@@ -122,6 +160,20 @@ def _build_label(payload: dict[str, Any], transcript: str, *, is_hard_negative: 
     except (KeyError, TypeError, ValueError) as exc:
         raise LabelingError(f"Labeling response missing/invalid 'risk': {payload!r}") from exc
     risk = max(0.0, min(1.0, risk))
+
+    if is_hard_negative:
+        # A hard negative is a legitimate call *by construction* -- `generate_hard_negative`
+        # forces risk 0.02, no tags and no spans. The labeller reads the transcript blind and
+        # on a real bank call that verifies an identity it returns risk 1.0 with tactic tags
+        # (observed on 32 of 50 English negatives, ADR D54). Accepting that would poison the
+        # very class the primary metric, FPR, is measured on. The label is by construction,
+        # so the model does not get a vote on it.
+        return Label(
+            risk=min(risk, HARD_NEGATIVE_RISK),
+            tactic_tags=(),
+            trigger_spans=(),
+            is_hard_negative=True,
+        )
 
     tags = _valid_tags(payload.get("tactic_tags") or [])
     spans = spans_from_phrases(payload.get("trigger_phrases") or [], transcript)
@@ -154,7 +206,6 @@ def main(argv: list[str] | None = None) -> None:  # pragma: no cover - CLI (live
 
     Independently re-labels an existing JSONL corpus and writes the re-labeled copy.
     """
-    from qorgan.data.generate import write_dialogues_jsonl
     from qorgan.llm_tools import build_client
 
     parser = argparse.ArgumentParser(description="Independently re-label a dialogue corpus.")
@@ -165,9 +216,28 @@ def main(argv: list[str] | None = None) -> None:  # pragma: no cover - CLI (live
     lines = [ln for ln in args.in_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     dialogues = [Dialogue.model_validate_json(ln) for ln in lines]
     client = build_client(get_config().gemini_api_key)
-    relabeled = label_corpus(dialogues, client=client)
-    write_dialogues_jsonl(relabeled, args.out_path)
-    print(f"re-labeled {len(relabeled)} dialogues -> {args.out_path}")
+
+    # Append and resume, like generation: a dropped connection costs one dialogue (ADR D53).
+    args.out_path.parent.mkdir(parents=True, exist_ok=True)
+    done = {
+        Dialogue.model_validate_json(ln).id
+        for ln in (args.out_path.read_text(encoding="utf-8").splitlines() if args.out_path.exists() else [])
+        if ln.strip()
+    }
+    if done:
+        print(f"resuming: {len(done)} already labelled in {args.out_path.name}")
+
+    written = 0
+    with args.out_path.open("a", encoding="utf-8") as handle:
+        def persist(dialogue: Dialogue) -> None:
+            nonlocal written
+            handle.write(dialogue.model_dump_json() + "\n")
+            handle.flush()
+            written += 1
+
+        label_corpus(dialogues, client=client, sink=persist, skip_ids=done)
+
+    print(f"re-labeled {written} dialogues -> {args.out_path} ({len(done) + written} total)")
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point

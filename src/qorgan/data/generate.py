@@ -16,6 +16,8 @@ mirrors the TeleAntiFraud-28k methodology referenced in `data/README.md`.
 from __future__ import annotations
 
 import argparse
+import time
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any, Literal
 
@@ -23,8 +25,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from qorgan.config import get_config
-from qorgan.data.schema import Dialogue, Label, TacticTag, Utterance, spans_from_phrases
-from qorgan.llm_tools import LLMResponseError, generate_json, thinking_budget_for
+from qorgan.data.schema import HARD_NEGATIVE_RISK, Dialogue, Label, TacticTag, Utterance, spans_from_phrases
+from qorgan.llm_tools import LLMResponseError, generate_json, is_transient, thinking_budget_for
 from qorgan.taxonomy import NegativeCategory, TacticDefinition, get_taxonomy
 
 # Generous ceiling: a multi-turn dialogue in JSON is long, and Gemini 2.5 thinking tokens
@@ -35,7 +37,10 @@ _MAX_TOKENS = 4096
 # Provisional risk assigned to generation-time (pre-label.py) dialogues. Day 2's
 # label.py replaces these with independently-assessed risk scores.
 _SEED_POSITIVE_RISK = 0.9
-_SEED_HARD_NEGATIVE_RISK = 0.02
+
+# A corpus run is hundreds of calls; one transient failure must not discard the batch (D53).
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_S = 2.0
 
 _LANGUAGE_INSTRUCTIONS = {
     "ru": "Write the entire dialogue in Russian.",
@@ -43,6 +48,11 @@ _LANGUAGE_INSTRUCTIONS = {
     "mixed": (
         "Write the dialogue in natural Kazakh-Russian code-switched speech, as commonly "
         "spoken in everyday Kazakhstani phone calls."
+    ),
+    "en": (
+        "Write the entire dialogue in English, as spoken by an English-speaking resident of "
+        "Kazakhstan: local institutions and money (Kaspi, Halyk, eGov, tenge, IIN) stay local, "
+        "only the language is English."
     ),
 }
 
@@ -84,7 +94,7 @@ class CorpusConfig(BaseModel):
 
     version: int
     seed: int
-    languages: tuple[Literal["ru", "kk", "mixed"], ...]
+    languages: tuple[Literal["ru", "kk", "mixed", "en"], ...]
     model_route: Literal["quality", "bulk"]
     dialogues_per_tactic: int = Field(ge=0)
     hard_negatives_per_category: int = Field(ge=0)
@@ -235,44 +245,59 @@ def generate_hard_negative(
         dialogue_id=dialogue_id or f"neg_{category_id}_{language}",
         language=language,
         tags=(),
-        risk=_SEED_HARD_NEGATIVE_RISK,
+        risk=HARD_NEGATIVE_RISK,
         is_hard_negative=True,
         force_empty_spans=True,
     )
 
 
-def generate_batch(cfg: CorpusConfig, *, client: Any) -> list[Dialogue]:
+def generate_batch(
+    cfg: CorpusConfig,
+    *,
+    client: Any,
+    sink: Callable[[Dialogue], None] | None = None,
+    skip_ids: Collection[str] = (),
+) -> list[Dialogue]:
     """Generate the full (tactic x language) + (hard-negative x language) batch per `cfg`.
 
     Deterministic iteration order (sorted tactic/category ids x configured languages) so
     output is stable given the same config and a deterministic client/model.
+
+    `sink` is called with each dialogue as it is produced, so a caller can persist
+    incrementally; `skip_ids` are not generated at all, so a run that died part-way resumes
+    instead of starting over. Both exist because two 170-call runs were lost whole to an
+    end-of-batch write (ADR D53).
     """
     taxonomy = get_taxonomy()
     dialogues: list[Dialogue] = []
+    already = frozenset(skip_ids)
+
+    def emit(dialogue: Dialogue) -> None:
+        dialogues.append(dialogue)
+        if sink is not None:
+            sink(dialogue)
 
     for tactic_id in sorted(taxonomy.tactic_ids()):
         for language in cfg.languages:
             for i in range(cfg.dialogues_per_tactic):
-                dialogues.append(
+                dialogue_id = f"{tactic_id}_{language}_{i}"
+                if dialogue_id in already:
+                    continue
+                emit(
                     generate_dialogue(
-                        tactic_id,
-                        language,
-                        client=client,
-                        cfg=cfg,
-                        dialogue_id=f"{tactic_id}_{language}_{i}",
+                        tactic_id, language, client=client, cfg=cfg, dialogue_id=dialogue_id
                     )
                 )
 
     for category_id in sorted(taxonomy.negative_ids()):
         for language in cfg.languages:
             for i in range(cfg.hard_negatives_per_category):
-                dialogues.append(
+                dialogue_id = f"neg_{category_id}_{language}_{i}"
+                if dialogue_id in already:
+                    continue
+                emit(
                     generate_hard_negative(
-                        category_id,
-                        language,
-                        client=client,
-                        cfg=cfg,
-                        dialogue_id=f"neg_{category_id}_{language}_{i}",
+                        category_id, language, client=client, cfg=cfg, dialogue_id=dialogue_id
                     )
                 )
 
@@ -302,18 +327,33 @@ def _resolve_model(cfg: CorpusConfig) -> str:
 
 
 def _call_tool(client: Any, prompt: str, cfg: CorpusConfig) -> dict[str, Any]:
+    """One structured-JSON call, retrying the failures that are worth retrying.
+
+    A corpus run is hundreds of calls, so a single slow socket or 5xx must not discard every
+    dialogue generated before it (ADR D53). `TimeoutError` comes from the shared wall-clock
+    deadline in `llm_tools`; `LLMResponseError` covers a truncated or unparseable payload,
+    which a fresh sample usually fixes. Exhausted retries raise `GenerationError` naming the
+    cause -- a short corpus must never pass silently.
+    """
     model = _resolve_model(cfg)
-    try:
-        return generate_json(
-            client,
-            model=model,
-            prompt=prompt,
-            response_schema=_RESPONSE_SCHEMA,
-            max_output_tokens=_MAX_TOKENS,
-            thinking_budget=thinking_budget_for(model),
-        )
-    except LLMResponseError as exc:
-        raise GenerationError(str(exc)) from exc
+    last: Exception | None = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            return generate_json(
+                client,
+                model=model,
+                prompt=prompt,
+                response_schema=_RESPONSE_SCHEMA,
+                max_output_tokens=_MAX_TOKENS,
+                thinking_budget=thinking_budget_for(model),
+            )
+        except Exception as exc:  # noqa: BLE001 -- re-raised below unless it is transient
+            if not isinstance(exc, LLMResponseError) and not is_transient(exc):
+                raise
+            last = exc
+            if attempt + 1 < _MAX_ATTEMPTS:
+                time.sleep(_RETRY_BACKOFF_S * (attempt + 1))
+    raise GenerationError(f"gave up after {_MAX_ATTEMPTS} attempts: {last}") from last
 
 
 def _build_dialogue(
@@ -362,9 +402,30 @@ def main(argv: list[str] | None = None) -> None:  # pragma: no cover - CLI (live
 
     cfg = load_corpus_config(args.config)
     client = build_client(get_config().gemini_api_key)
-    dialogues = generate_batch(cfg, client=client)
-    write_dialogues_jsonl(dialogues, cfg.output_path)
-    print(f"wrote {len(dialogues)} dialogues -> {cfg.output_path}")
+
+    # Append as we go and skip what is already there, so a dropped connection costs one
+    # dialogue instead of the whole run (ADR D53). Re-running the command resumes.
+    output = cfg.output_path
+    output.parent.mkdir(parents=True, exist_ok=True)
+    done = {
+        Dialogue.model_validate_json(line).id
+        for line in (output.read_text(encoding="utf-8").splitlines() if output.exists() else [])
+        if line.strip()
+    }
+    if done:
+        print(f"resuming: {len(done)} dialogues already in {output.name}")
+
+    written = 0
+    with output.open("a", encoding="utf-8") as handle:
+        def persist(dialogue: Dialogue) -> None:
+            nonlocal written
+            handle.write(dialogue.model_dump_json() + "\n")
+            handle.flush()
+            written += 1
+
+        generate_batch(cfg, client=client, sink=persist, skip_ids=done)
+
+    print(f"wrote {written} new dialogues -> {output} ({len(done) + written} total)")
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point
