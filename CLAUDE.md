@@ -30,6 +30,8 @@ startup and daily). Every write route is named in `tests/test_architecture.py`.
 7. Every `/api/admin` route needs an authenticated analyst (`X-Analyst-Key`, `QORGAN_ANALYST_KEYS`)
 and fails closed; a full transcript needs the investigator role and a stated purpose; the
 audit log is an HMAC chain (`QORGAN_AUDIT_CHAIN_KEY`; `python -m qorgan.audit verify`).
+The one opt-in exception is `QORGAN_ADMIN_OPEN_ACCESS` (default `off`; ADR D59): the hosted
+demo admits keyless visitors as the audited identity `public-demo`. Fabricated data only.
 
 `app/` (Streamlit) is a **local dev harness only** (ADR D4): it scores on the server and its
 mic mode uploads audio. Never present it as the product.

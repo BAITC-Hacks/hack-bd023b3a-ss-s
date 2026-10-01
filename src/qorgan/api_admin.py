@@ -191,6 +191,8 @@ class SessionResponse(BaseModel):
     role: str
     can_open_cases: bool
     open_purposes: list[str]
+    # The server admits keyless visitors as `public-demo` (ADR D59); the page then skips sign-in.
+    open_access: bool
 
 
 class OpenCaseResponse(IncidentAnalysisResponse):
@@ -244,6 +246,7 @@ def session(analyst: Analyst = Depends(require_analyst)) -> SessionResponse:
     return SessionResponse(
         id=analyst.id, role=analyst.role,
         can_open_cases=analyst.has_role("investigator"), open_purposes=list(ACCESS_PURPOSES),
+        open_access=get_config().admin_open_access is not None,
     )
 
 

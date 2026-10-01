@@ -30,7 +30,10 @@ ROLES: tuple[str, ...] = get_args(Role)
 ANALYST_ID_PATTERN = r"^[a-z][a-z0-9_.-]{1,31}$"
 MIN_SECRET_CHARS = 16
 # Ids the console itself writes into the audit log; a real analyst must never share them.
-RESERVED_IDS = frozenset({"anonymous-analyst", "unauthenticated", "system"})
+# The identity of a keyless request when the console is open for a public demo
+# (`QORGAN_ADMIN_OPEN_ACCESS`, ADR D59); reserved so no configured analyst can share it.
+PUBLIC_DEMO_ID = "public-demo"
+RESERVED_IDS = frozenset({"anonymous-analyst", "unauthenticated", "system", PUBLIC_DEMO_ID})
 _ENTRY_SEPARATOR = ","
 _FIELD_SEPARATOR = ":"
 _ANALYST_ID_RE = re.compile(ANALYST_ID_PATTERN)

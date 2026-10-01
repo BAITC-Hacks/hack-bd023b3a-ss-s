@@ -130,7 +130,8 @@ def test_session_endpoint_names_the_signed_in_analyst_and_role(client, tmp_path)
 
     assert analyst.status_code == 200
     assert analyst.json() == {"id": ANALYST_ID, "role": "analyst", "can_open_cases": False,
-                              "open_purposes": ["pattern_review", "citizen_request", "partner_request"]}
+                              "open_purposes": ["pattern_review", "citizen_request", "partner_request"],
+                              "open_access": False}
     assert investigator.json()["id"] == INVESTIGATOR_ID and investigator.json()["can_open_cases"] is True
     starts = [(e.actor_id, e.action, e.outcome) for e in _audit(tmp_path)]
     assert starts == [(ANALYST_ID, "session.start", "ok:analyst"), (INVESTIGATOR_ID, "session.start", "ok:investigator")]

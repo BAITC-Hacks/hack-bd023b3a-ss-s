@@ -50,6 +50,9 @@ _DEFAULT_WEB_WEIGHTS_SUBPATH = Path("site") / "models" / "weights.json"
 # device score identically by construction); `auto` = the bundle when it is valid for the
 # current lexicons, else the browser weights -- never the keyword `mock` while a real model exists.
 _LINEAR_WEIGHTS_SOURCES = ("auto", "bundle", "web")
+# Open demo access to the analyst console (ADR D59): `off`, or the role a keyless request gets
+# as the audited identity `public-demo`. For a public demo of fabricated data only.
+_ADMIN_OPEN_ACCESS_VALUES = ("off", "analyst", "investigator")
 # Level of the server's own `qorgan.*` log lines (purge runs, weight fallbacks, audit failures).
 _LOG_LEVELS = ("debug", "info", "warning", "error")
 _DEFAULT_LOG_LEVEL = "info"
@@ -195,6 +198,9 @@ class Config(BaseModel):
     analyst_credentials: tuple[AnalystCredential, ...]
     # HMAC key chaining the audit log (`audit.py`); None means every audited API is closed.
     audit_chain_key: SecretBytes | None
+    # `QORGAN_ADMIN_OPEN_ACCESS`: None (default) = a key is required; otherwise the role a
+    # keyless request gets as `public-demo` (ADR D59). Still audited; still needs the audit key.
+    admin_open_access: Literal["analyst", "investigator"] | None = None
 
     # --- Reproducibility / localization ---
     default_seed: int
@@ -313,6 +319,11 @@ def _read_choice(env: Mapping[str, str], key: str, choices: tuple[str, ...], def
     if raw not in choices:
         raise ConfigError(f"{key}={raw!r} must be one of {list(choices)}")
     return raw
+
+
+def _read_open_access(env: Mapping[str, str]) -> str | None:
+    value = _read_choice(env, "QORGAN_ADMIN_OPEN_ACCESS", _ADMIN_OPEN_ACCESS_VALUES, "off")
+    return None if value == "off" else value
 
 
 def _read_switch(env: Mapping[str, str], key: str, values: Mapping[str, bool], default: str) -> bool:
@@ -449,6 +460,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
             ),
             analyst_credentials=parse_analyst_credentials(source.get("QORGAN_ANALYST_KEYS", "")),
             audit_chain_key=_read_secret_bytes(source, "QORGAN_AUDIT_CHAIN_KEY"),
+            admin_open_access=_read_open_access(source),
             supported_locales=_read_csv_tuple(
                 source, "QORGAN_SUPPORTED_LOCALES", _DEFAULT_SUPPORTED_LOCALES
             ),

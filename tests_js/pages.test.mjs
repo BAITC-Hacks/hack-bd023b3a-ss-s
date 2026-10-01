@@ -60,3 +60,13 @@ test("an overtaken console load never renders", () => {
   assert.match(load, /if \(stale\(\)\) return;\n\n {6}if \(!body\.available\)/, "checked before the first render");
   assert.match(load, /loadStats\(stale\)/);
 });
+
+// Open demo access (ADR D59): without a stored key the console asks the server first and
+// skips the sign-in only when the server itself says it is open.
+test("a keyless visitor gets the console only when the server reports open access", () => {
+  const js = read("admin.js");
+  assert.match(js, /else tryOpenAccess\(\);/);
+  const probe = js.match(/const tryOpenAccess = async \(\) => \{[\s\S]*?\n {2}\};\n/)?.[0] || "";
+  assert.match(probe, /if \(!body\?\.open_access\) \{\s*showSignin\(\);/);
+  assert.doesNotMatch(probe, /X-Analyst-Key/, "the probe carries no key");
+});

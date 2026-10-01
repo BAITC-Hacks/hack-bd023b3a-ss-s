@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from fastapi import Depends, HTTPException, Request, Response, Security
 from fastapi.security import APIKeyHeader
 
-from qorgan.analysts import Analyst, AnalystRegistry
+from qorgan.analysts import PUBLIC_DEMO_ID, Analyst, AnalystRegistry
 from qorgan.api_ratelimit import SlidingWindowLimiter
 from qorgan.audit import (
     AUDIT_FILENAME,
@@ -62,9 +62,13 @@ def reset_limiters() -> None:
 
 
 def require_analyst(request: Request, response: Response, api_key: str | None = Security(_key_scheme)) -> Analyst:
-    """The authenticated analyst, or 503 (console not configured) / 401 / 429."""
+    """The authenticated analyst, or 503 (console not configured) / 401 / 429.
+
+    With open demo access (`QORGAN_ADMIN_OPEN_ACCESS`, ADR D59) a request carrying *no* key is
+    the audited identity `public-demo` in the configured role; a presented key is still checked.
+    """
     cfg = get_config()
-    if not cfg.analyst_credentials:
+    if not cfg.analyst_credentials and cfg.admin_open_access is None:
         raise HTTPException(
             status_code=503,
             detail="analyst console is closed: no analyst credentials are configured on this server (QORGAN_ANALYST_KEYS)",
@@ -75,7 +79,10 @@ def require_analyst(request: Request, response: Response, api_key: str | None = 
             detail="analyst console is closed: no audit-chain key is configured (QORGAN_AUDIT_CHAIN_KEY), "
             "so console actions could not be accounted for",
         )
-    analyst = AnalystRegistry(cfg.analyst_credentials).authenticate(api_key)
+    if not api_key and cfg.admin_open_access is not None:
+        analyst = Analyst(id=PUBLIC_DEMO_ID, role=cfg.admin_open_access)
+    else:
+        analyst = AnalystRegistry(cfg.analyst_credentials).authenticate(api_key)
     if analyst is None:
         if api_key:
             if not _FAILED_AUTH_LIMITER.allow(_client(request)):

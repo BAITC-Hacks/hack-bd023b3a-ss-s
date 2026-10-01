@@ -1438,3 +1438,38 @@ throwaway key on a scratch data dir: a fresh visit with a stored `en` or `kk` ma
 **Not covered.** A browser whose worker cached the old page and that never visits again keeps
 it; nothing can reach it. Browsers that visited before this change and already moved to v6 are
 unaffected: v6 is network-first.
+
+### D59 — Open demo access to the analyst console, off by default (2026-10-01)
+The jury has no analyst key, so on the hosted demo it cannot see Level 2. The team decided to
+switch the restricted access off **for the demo** and to state in the README that it exists.
+**Change.** `QORGAN_ADMIN_OPEN_ACCESS` = `off` (default) | `analyst` | `investigator`. When it
+is set, `require_analyst` serves a request carrying **no** key as the reserved identity
+`public-demo` (now in `RESERVED_IDS`, so no configured analyst can take it) in that role. The
+rest of invariant 7 is untouched:
+- every route still goes through `require_analyst`;
+- every action is audited, under `public-demo`;
+- the audit-chain key is still required (503 without it);
+- the role and the stated purpose still gate a full transcript;
+- the per-identity rate limits and the hourly open budget still apply, shared by all visitors;
+- a presented key keeps its own identity, and a wrong key is still a 401.
+
+Personal keys become optional while the switch is on. `GET /api/admin/session` reports
+`open_access`. The page tries a keyless session when it holds no key and skips the sign-in only
+when the server reports `open_access: true`. It then shows "open demo access" and the audited
+identity, with no sign-out.
+**Why a switch, not a deletion.** Requiring keys again is one deleted variable. The default stays
+fail-closed, so `tests/test_architecture.py` and the auth tests keep guarding it. The privacy story
+is still true for a real deployment.
+**Cost, on record.** While it is on, anyone with the URL holds the configured role. With
+`investigator` they can open full (scrubbed) transcripts of every report on the server, including
+any a real visitor submits on the public demo. Acceptable only while the server holds fabricated
+data; switch it off before any real report could arrive (`docs/DEPLOY.md` §7).
+**Evidence.** `tests/test_api_admin_open_access.py` (9): off by default → 401; an unknown value
+is a config error; the identity is reserved; `analyst` → console 200 and a full transcript 403,
+with the refusal audited as `public-demo`; `investigator` → open with a purpose, audited as
+`(public-demo, pattern_review)`; a personal key keeps its identity; a wrong key → 401; no
+personal keys needed, but no audit key → 503. `tests_js/pages.test.mjs` pins the page's probe.
+`pytest` 1320 passed, `npm test` 71/71. Local API with `QORGAN_ADMIN_OPEN_ACCESS=investigator`
+in Chromium: a fresh visit opens the console without sign-in (500 incidents, 5 organizations),
+the `/api/admin` requests are session, overview and stats, all 200, and the audit log reads
+`public-demo session.start ok:investigator`.

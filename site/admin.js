@@ -99,7 +99,8 @@
 
   // Every console request carries the key; a 401 ends the session (key revoked or rotated).
   const api = async (path, opts = {}) => {
-    const headers = { ...(opts.headers || {}), "X-Analyst-Key": analystKey };
+    // Keyless only on a server with open demo access (ADR D59): it answers as `public-demo`.
+    const headers = { ...(opts.headers || {}), ...(analystKey ? { "X-Analyst-Key": analystKey } : {}) };
     const res = await fetch(path, { ...opts, headers, cache: "no-store" });
     if (res.status === 401) {
       endSession("Your key is no longer accepted — sign in again.", "error");
@@ -816,9 +817,33 @@
     consoleEl.hidden = false;
     toolbarEl.hidden = false;
     sessionEl.hidden = false;
+    const keyless = !analystKey;
+    if (signOutBtn) signOutBtn.hidden = keyless;
     whoEl.innerHTML =
-      `signed in as <b>${esc(me.id)}</b> <span class="adm-role adm-role--${esc(me.role)}">${esc(me.role)}</span>` +
+      (keyless
+        ? `open demo access <span class="adm-role adm-role--${esc(me.role)}">${esc(me.role)}</span>` +
+          ' <span class="adm-who-note">no sign-in on this demo server; every action is still audited as ' +
+          `<b>${esc(me.id)}</b></span>`
+        : `signed in as <b>${esc(me.id)}</b> <span class="adm-role adm-role--${esc(me.role)}">${esc(me.role)}</span>`) +
       (me.can_open_cases ? "" : ' <span class="adm-who-note">aggregates &amp; excerpts; opening a transcript needs an investigator</span>');
+  };
+
+  // A server with open demo access (QORGAN_ADMIN_OPEN_ACCESS, ADR D59) admits a keyless visitor
+  // as `public-demo`; anywhere else this answers 401 and the sign-in stays.
+  const tryOpenAccess = async () => {
+    try {
+      const res = await fetch("/api/admin/session", { cache: "no-store" });
+      const body = res.ok ? await res.json() : null;
+      if (!body?.open_access) {
+        showSignin();
+        return;
+      }
+      me = body;
+      showConsole();
+      await load();
+    } catch {
+      showSignin();
+    }
   };
 
   // Forget the key and everything rendered with it.
@@ -910,5 +935,5 @@
   });
 
   if (analystKey) startSession(analystKey);
-  else showSignin();
+  else tryOpenAccess();
 })();

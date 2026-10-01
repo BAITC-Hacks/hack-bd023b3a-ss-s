@@ -76,6 +76,13 @@ kept as history._
   calls with call content: `POST /api/reports`, `DELETE /api/reports/{receipt}`. Model load
   ~3 s from localhost, ~0.6 s first inference (WASM/WebGPU).
 
+## 2026-10-01 — open demo access for the jury (ADR D59)
+
+- `QORGAN_ADMIN_OPEN_ACCESS=investigator` on the hosted demo lets a visitor without a key
+  into the analyst console as `public-demo`. It is still audited, still needs the audit
+  key, and still needs a purpose for a full transcript. The default is `off` (keys required);
+  the README says so. **Switch it off before any real report could reach that server.**
+
 ## 2026-10-01 — the analyst console after a deploy (ADR D58)
 
 - The D57 deploy was healthy, but the console showed *"Dashboard offline — API returned 401"*
