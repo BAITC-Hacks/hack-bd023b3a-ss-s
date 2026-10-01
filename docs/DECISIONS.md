@@ -1354,3 +1354,44 @@ floor is still needed. It needs a Gemini key (not available in this workspace) a
 Claude-written text for training (`shift` is Claude-authored). Until then: the demo's
 hard-negative call is unaffected (0.007), and this probe set should become a small,
 ledger-tracked evaluation file once a second author reviews it.
+
+### D57 — The image builds and starts on Railway, not only on a local BuildKit (2026-10-01)
+The deploy of `2d0354b` (PR #8, the hardened image) failed on Railway. The old single-stage
+image had deployed there. Three things in the new `Dockerfile` and entrypoint are specific to a
+local Docker setup:
+1. **BuildKit cache mounts.** There were three: the pip, Hub and Vosk caches. Railway refuses
+   any `--mount=type=cache` whose id is not `s/<service-id>-<path>` (*"Cache mount ID is not
+   prefixed with cache key"*, docs.railway.com/builds/dockerfiles). This was the build failure.
+2. **`COPY --exclude`.** The `moby/buildkit:v0.12.5` frontend rejects it: *"dockerfile parse
+   error on line 64: unknown flag: exclude"* (reproduced). `HEALTHCHECK --start-interval` has the
+   same portability problem.
+3. **A non-root image on a platform volume.** Railway mounts volumes root-owned. Run as uid
+   10001, the entrypoint's first `cp` into the volume fails (*"Permission denied"*) and the
+   container exits at once, which Railway reports as a crash loop. Reproduced with a root-owned
+   volume.
+
+**Change.** The cache mounts and `--exclude` are gone. `PIP_NO_CACHE_DIR=1` is set, and the
+bootstrap `RUN` deletes its download caches in its own layer, so the image size is unchanged
+(1.73 GB vs 1.70 GB). One `COPY site` replaces the two-layer split. `--start-interval` is gone
+from `HEALTHCHECK`; compose keeps its own. The entrypoint, when started as root
+(`RAILWAY_RUN_UID=0`), gives the state directory to uid 10001 and re-executes itself through
+`setpriv`, so the server never runs as root. Run as non-root on a directory it cannot write, it
+stops with exit 78 and a message that names the fix. `.dockerignore` drops
+`site/models/qorgan`, the D18-rejected static graph (282 MB of local build context).
+`docs/DEPLOY.md` §8 is the Railway runbook. `tests/test_dockerfile_portability.py` pins these
+rules: it fails 4 of 5 on the `2d0354b` files and passes 5 of 5 now.
+**Evidence.** The build is from a clean clone of `2d0354b` plus this change, so it has no local
+models, like Railway's clone. It builds on `moby/buildkit:v0.12.5` (linux/amd64), which rejected
+the original, and on buildx 0.37. The runtime was checked on native arm64, with secrets as env
+vars and `PORT=8080`:
+- no volume: healthy in 22 s, server uid 10001, `/api/admin/overview` 200, report `POST` 201;
+- root-owned volume as root: healthy in 22 s, server uid 10001, files in the volume owned by
+  10001 with mode 0640; a restart on the same volume is healthy in 4 s ("L2 seeds: present");
+- root-owned volume as non-root: exit 78 with the message;
+- the compose hardening flags (read-only root filesystem, `cap_drop ALL`, no-new-privileges):
+  healthy in 25 s.
+
+`/api/health` reports `linear_model_source: "web"` in every case.
+**Not verified here.** No Railway log was read: there is no CLI or token in this workspace. The
+cache-mount failure is inferred from Railway's documented rule, not observed. Railway's real
+BuildKit version is unknown, which is why the Dockerfile no longer relies on newer syntax.

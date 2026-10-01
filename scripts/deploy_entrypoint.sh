@@ -18,6 +18,22 @@ fi
 
 state_dir="${QORGAN_DATA_DIR:-/app/data}/processed"
 mkdir -p "$state_dir"
+
+# A platform volume is mounted root-owned (Railway: run with RAILWAY_RUN_UID=0, docs/DEPLOY.md
+# §8), which the service account cannot write. Started as root, take the state directory for
+# the service account and re-run this script as it; the server itself never runs as root.
+service_uid=10001
+if [ "$(id -u)" = 0 ]; then
+    chown -R "$service_uid:$service_uid" "$state_dir"
+    export HOME=/home/qorgan
+    exec setpriv --reuid="$service_uid" --regid="$service_uid" --init-groups --inh-caps=-all -- "$0" "$@"
+fi
+if [ ! -w "$state_dir" ]; then
+    echo "qorgan: $state_dir is not writable by uid $(id -u) (a root-owned volume?). Start the" \
+         "container as root so it can take the directory -- on Railway set RAILWAY_RUN_UID=0" \
+         "(docs/DEPLOY.md §8) -- or chown the volume to $service_uid." >&2
+    exit 78
+fi
 # The volume holds runtime state next to the published corpus splits the bootstrap expects
 # there. The image's copy wins, so a volume created by an older image gets the current,
 # scrubbed splits and nothing is fetched from the network. Runtime state is never in this copy.

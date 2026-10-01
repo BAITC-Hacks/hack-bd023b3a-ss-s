@@ -1,6 +1,6 @@
 # Project Status & Handoff — Qorğan
 
-_Last updated: **2026-09-27**. Current-state doc for anyone picking the project up. Read this,
+_Last updated: **2026-10-01**. Current-state doc for anyone picking the project up. Read this,
 then `docs/PLAN_2026-09.md` (the post-verdict plan and what is open), `docs/DECISIONS.md`
 (ADRs D11–D54), `docs/eval_report.md` (numbers, with intervals). The July sprint log below is
 kept as history._
@@ -75,6 +75,20 @@ kept as history._
   receipt, digest + `+7 700 ***` on disk, raw number absent; delete → gone. Only network
   calls with call content: `POST /api/reports`, `DELETE /api/reports/{receipt}`. Model load
   ~3 s from localhost, ~0.6 s first inference (WASM/WebGPU).
+
+## 2026-10-01 — the hardened image deploys on Railway again (ADR D57)
+
+- The Railway deploy of `2d0354b` failed. The PR #8 Dockerfile used BuildKit cache mounts,
+  which Railway refuses without a service-id prefix, and `COPY --exclude`, which older
+  frontends reject (reproduced on BuildKit v0.12.5). Its non-root user also cannot write a
+  root-owned Railway volume (reproduced: exit at the first `cp`).
+- All three are fixed. Builds pass on BuildKit v0.12.5 and buildx 0.37, from a clean clone
+  without local models. All four start modes are healthy or fail with a clear message: no
+  volume, root-owned volume via `RAILWAY_RUN_UID=0`, restart on a used volume, and the compose
+  hardening flags. Railway runbook: `docs/DEPLOY.md` §8. Guard:
+  `tests/test_dockerfile_portability.py`.
+- **Open:** confirm against the real Railway build log, check the service settings (volume
+  path and `RAILWAY_RUN_UID=0` if there is a volume), then redeploy (outward-facing).
 
 ## 2026-09-28 — English is a third call language (ADR D54)
 
