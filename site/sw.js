@@ -7,7 +7,7 @@
    - /api/ and anything cross-origin: never cached, never intercepted -- the only network
      traffic with call content is the explicit report submit, and it must stay live. */
 
-const SHELL_CACHE = "qorgan-shell-v6"; // v6: network-first shell (no mixed versions after a deploy); v5: landing in kk/ru/en (landing.js, i18n-dom.js); v4: live page in kk/ru/en; v3: report review (D44); v2: COOP/COEP (B9)
+const SHELL_CACHE = "qorgan-shell-v7"; // v7: reload pages a cache-first worker rendered; v6: network-first shell (no mixed versions after a deploy); v5: landing in kk/ru/en (landing.js, i18n-dom.js); v4: live page in kk/ru/en; v3: report review (D44); v2: COOP/COEP (B9)
 const MODEL_CACHE = "qorgan-models-v1";
 const SHELL = [
   "/", "/index.html", "/live.html", "/styles.css", "/live.css", "/main.js", "/live.js", "/try.js",
@@ -30,12 +30,31 @@ self.addEventListener("install", (event) => {
   );
 });
 
+// Shells v1-v5 were served cache-first (stale-while-revalidate): a page open while this worker
+// activates was rendered from that cache -- after a deploy, the analyst console's pre-sign-in
+// admin.js ("Dashboard offline -- API returned 401"). Replacing such a worker reloads the open
+// pages once, now network-first; replacing a network-first shell (v6+) reloads nothing.
+const CACHE_FIRST_SHELL = /^qorgan-shell-v[1-5]$/;
+
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => ![SHELL_CACHE, MODEL_CACHE].includes(k)).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
-  );
+  const replaced = activate();
+  event.waitUntil(replaced);
+  // Outside waitUntil: a navigation is handled only once this worker has activated, so waiting
+  // for it here would never finish (the page would hang on "Loading").
+  replaced.then((stale) => { if (stale.some((k) => CACHE_FIRST_SHELL.test(k))) reloadPages(); });
 });
+
+async function activate() {
+  const stale = (await caches.keys()).filter((k) => ![SHELL_CACHE, MODEL_CACHE].includes(k));
+  await Promise.all(stale.map((k) => caches.delete(k)));
+  await self.clients.claim();
+  return stale;
+}
+
+async function reloadPages() {
+  const pages = await self.clients.matchAll({ type: "window" });
+  await Promise.allSettled(pages.map((page) => page.navigate(page.url)));
+}
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);

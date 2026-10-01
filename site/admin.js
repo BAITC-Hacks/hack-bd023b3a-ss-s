@@ -610,7 +610,13 @@
     }
   };
 
+  // Loads overlap (a sign-in completing while the language switch applies the stored locale,
+  // a quick language change): only the newest may render, or a slower answer in the previous
+  // language overwrites it.
+  let loadSeq = 0;
   const load = async () => {
+    const seq = ++loadSeq;
+    const stale = () => seq !== loadSeq;
     kpisEl.setAttribute("aria-busy", "true");
     analysisCache.clear(); // locale-dependent names; cheap to re-score on demand
     openNotes.clear();
@@ -619,6 +625,7 @@
       const res = await api(`/api/admin/overview?locale=${locale()}`);
       if (!res.ok) throw new Error(await errorDetail(res));
       const body = await res.json();
+      if (stale()) return;
 
       if (!body.available) {
         kpisEl.innerHTML = "";
@@ -633,9 +640,9 @@
       renderKpis(body.kpis);
       renderNovel(orgs);
       renderQueue();
-      await loadStats();
+      await loadStats(stale);
     } catch (e) {
-      if (e instanceof AuthError) return;
+      if (e instanceof AuthError || stale()) return;
       kpisEl.innerHTML = "";
       novelEl.innerHTML = "";
       statsSection.hidden = true;
@@ -645,18 +652,19 @@
           "<code>python -m qorgan.api</code>."
       );
     } finally {
-      kpisEl.removeAttribute("aria-busy");
+      if (!stale()) kpisEl.removeAttribute("aria-busy");
     }
   };
 
   // Statistics are additive — a failure here must never take the dashboard down.
-  const loadStats = async () => {
+  const loadStats = async (stale = () => false) => {
     try {
       const res = await api(`/api/admin/stats?locale=${locale()}`);
       if (!res.ok) throw new Error(`API returned ${res.status}`);
-      renderStats(await res.json());
+      const body = await res.json();
+      if (!stale()) renderStats(body);
     } catch {
-      statsSection.hidden = true;
+      if (!stale()) statsSection.hidden = true;
     }
   };
 
@@ -889,7 +897,10 @@
   );
   document
     .querySelectorAll('input[name="adm-loc"]')
-    .forEach((radio) => radio.addEventListener("change", load));
+    // admin-lang.js fires this on page load; before sign-in there is nothing to reload (and a
+    // keyless request would read as a revoked key). A session in progress loads in the
+    // language checked when it completes.
+    .forEach((radio) => radio.addEventListener("change", () => { if (me) load(); }));
   refreshBtn?.addEventListener("click", load);
   ingestBtn?.addEventListener("click", runIngest);
   modalClose.addEventListener("click", closeModal);

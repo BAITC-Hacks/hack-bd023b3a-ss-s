@@ -39,3 +39,24 @@ test("the landing sends citizens to the citizen page", () => {
   const html = read("index.html");
   assert.ok((html.match(/href="live\.html" data-i18n="landing\.cta_check"/g) || []).length >= 2, "header + hero call to action");
 });
+
+// admin-lang.js applies the stored/browser language on load by firing "change" on the content
+// radios. Before sign-in that must not load the console: a keyless request is a 401, which the
+// console reads as a revoked key ("Your key is no longer accepted") on a first visit.
+test("a content-language change reloads the console only for a signed-in analyst", () => {
+  const js = read("admin.js");
+  const wiring = js.match(/querySelectorAll\('input\[name="adm-loc"\]'\)[\s\S]*?\);\n/)?.[0] || "";
+  assert.ok(wiring, "the adm-loc wiring exists");
+  assert.doesNotMatch(wiring, /addEventListener\("change", load\)/, "guard the reload with the session");
+  assert.match(wiring, /if \(me\) load\(\)/);
+});
+
+// Loads overlap (sign-in completing while the stored language is applied): only the newest
+// may render, or a slower answer in the previous language overwrites the console.
+test("an overtaken console load never renders", () => {
+  const js = read("admin.js");
+  const load = js.match(/const load = async \(\) => \{[\s\S]*?\n {2}\};\n/)?.[0] || "";
+  assert.match(load, /const seq = \+\+loadSeq;/);
+  assert.match(load, /if \(stale\(\)\) return;\n\n {6}if \(!body\.available\)/, "checked before the first render");
+  assert.match(load, /loadStats\(stale\)/);
+});
