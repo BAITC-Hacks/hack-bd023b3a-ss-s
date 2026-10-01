@@ -75,19 +75,44 @@ def test_committed_client_config_is_current():
     assert json.loads(committed.read_text(encoding="utf-8")) == export_client_config()
 
 
-def test_served_weights_match_the_trained_bundle_when_present():
-    """`site/models/weights.json` is what the browser loads; it must be the export of the
-    bundle in `models/linear` (regenerate with scripts/export_parity_fixtures.py)."""
+def test_served_weights_are_current_for_the_repo_lexicons():
+    """The committed `site/models/weights.json` is the shipped model (the browser, and the
+    server under `QORGAN_LINEAR_WEIGHTS=web|auto`). It must load, and the lexicons embedded in
+    it must be the repo's: editing `data/lexicon/*.yaml` without retraining and re-exporting
+    (scripts/export_parity_fixtures.py) fails here, on every checkout -- not only on a machine
+    that happens to hold a trained bundle."""
+    from pathlib import Path
+
+    from qorgan.classifier.cue_lexicon import lexicon_hash, load_cue_lexicon
+    from qorgan.classifier.reassurance import load_reassurance_patterns, reassurance_hash
+    from qorgan.classifier.web_bundle import load_linear_from_web
+
+    served = load_linear_from_web(Path(__file__).resolve().parents[2] / "site" / "models" / "weights.json")
+    assert served.cue_lexicon_hash == lexicon_hash(load_cue_lexicon())
+    assert served.reassurance_hash == reassurance_hash(load_reassurance_patterns())
+
+
+def test_served_weights_match_a_current_trained_bundle_when_present():
+    """When `models/linear` holds a bundle that is valid for the current lexicons, the
+    browser weights must be its export (a retrain not yet published fails here). A bundle
+    that is stale for the current lexicons (e.g. an older Hub download) is not the shipped
+    model, so it is not compared."""
     import hashlib
     from pathlib import Path
 
     import pytest
+
+    from qorgan.classifier.linear_train import LinearFeatureMismatchError, load_linear
 
     root = Path(__file__).resolve().parents[2]
     trained = root / "models" / "linear" / "web" / "weights.json"
     served = root / "site" / "models" / "weights.json"
     if not trained.exists():
         pytest.skip("no local trained bundle")
+    try:
+        load_linear(root / "models" / "linear")
+    except LinearFeatureMismatchError:
+        pytest.skip("the local bundle is stale for the current lexicons; the committed weights are served")
     assert served.exists()
     assert hashlib.sha256(served.read_bytes()).hexdigest() == hashlib.sha256(trained.read_bytes()).hexdigest()
 

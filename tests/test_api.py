@@ -53,3 +53,19 @@ def test_analyze_kk_locale_renders_kk_explanation(client: TestClient) -> None:
 
 def test_blank_transcript_rejected(client: TestClient) -> None:
     assert client.post("/api/analyze", json={"transcript": "   "}).status_code == 422
+
+
+# --- QA 2026-09-29 -------------------------------------------------------------------------
+
+
+def test_english_is_an_analyze_locale(client: TestClient) -> None:
+    # ADR D52 made English a reviewed content locale; the citizen endpoint refused it with 422.
+    res = client.post("/api/analyze", json={"transcript": "Назовите код из SMS", "backend": "mock", "locale": "en"})
+    assert res.status_code == 200
+    assert res.json()["explanation"]["reason"]
+
+
+def test_an_unknown_backend_is_a_client_error_not_a_500(client: TestClient) -> None:
+    res = client.post("/api/analyze", json={"transcript": "Алло", "backend": "nope"})
+    assert res.status_code == 422
+    assert "nope" not in res.text  # refusals name the problem, never echo the input

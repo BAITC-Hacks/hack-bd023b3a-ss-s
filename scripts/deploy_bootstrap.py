@@ -39,10 +39,11 @@ DIALOGUE_POOL_SPLITS = ("train.jsonl", "val.jsonl", "test.jsonl")
 LEGACY_SPLIT_NAMES = {"authored_heldout.jsonl": "real_heldout.jsonl"}
 
 # Scored once to prove the linear backend actually loads (also warms the embedder cache).
+# Prints which heads the linear backend serves ("bundle" | "web"); exits non-zero if neither.
 _PROBE_SNIPPET = (
     "import sys; from qorgan.classifier import predict; "
     "r = predict.score('Алло, это служба безопасности банка, назовите код из смс.', backend='linear'); "
-    "sys.exit(0 if r.backend == 'linear' else 1)"
+    "sys.exit(1) if r.backend != 'linear' else print(predict.linear_model_source())"
 )
 
 
@@ -96,36 +97,61 @@ def ensure_dialogue_pool() -> None:
     _log(f"dialogue pool: {len(lines)} dialogues -> {pool_path}")
 
 
-def _linear_backend_works() -> bool:
-    # Probed in a subprocess so a retrain is picked up fresh (predict caches per process).
-    result = subprocess.run([sys.executable, "-c", _PROBE_SNIPPET], cwd=REPO_ROOT)
-    return result.returncode == 0
+def _linear_source() -> str | None:
+    """Which heads the linear backend would serve: "bundle", "web" or None (neither usable).
+    Probed in a subprocess so a retrain is picked up fresh (predict caches per process)."""
+    result = subprocess.run([sys.executable, "-c", _PROBE_SNIPPET], cwd=REPO_ROOT, capture_output=True, text=True)
+    lines = result.stdout.split()
+    return lines[-1] if result.returncode == 0 and lines and lines[-1] in ("bundle", "web") else None
 
 
-def ensure_model() -> None:
-    if not (MODEL_DIR / "metadata.json").exists():
+def ensure_model() -> str:
+    """Make the `linear` backend servable; returns the source: "bundle", "web" or "retrained".
+
+    The committed browser weights (`site/models/weights.json`) are the shipped model. When the
+    trained bundle is missing or stale for the current lexicons but those weights are usable,
+    the server serves them (`QORGAN_LINEAR_WEIGHTS=auto|web`) and nothing is retrained: a
+    retrain here would train a *different* model (other corpus, server embeddings) than the one
+    every browser runs. Retraining remains the last resort when neither source is usable."""
+    from qorgan.config import get_config
+
+    policy = get_config().linear_weights_source
+    if policy != "web" and not (MODEL_DIR / "metadata.json").exists():
         from huggingface_hub import snapshot_download
 
         _log(f"model: downloading {MODEL_REPO}")
         try:
             snapshot_download(MODEL_REPO, local_dir=MODEL_DIR)
-        except Exception as exc:  # private repo / offline — retraining covers it
-            _log(f"model: download failed ({exc}); falling back to retrain")
-    if _linear_backend_works():
-        _log("model: linear backend OK")
-        return
-    _log("model: bundle unusable (hash drift or missing) — retraining from corpus")
+        except Exception as exc:  # private repo / offline — the browser weights or a retrain cover it
+            _log(f"model: download failed ({exc})")
+    source = _linear_source()
+    if source == "bundle":
+        _log("model: linear backend OK (trained bundle)")
+        return "bundle"
+    if source == "web":
+        _log("model: linear backend OK (the committed browser weights, site/models/weights.json -- "
+             "models/linear is missing or stale for the current lexicons; not retraining)")
+        return "web"
+    if policy == "web":
+        raise RuntimeError("QORGAN_LINEAR_WEIGHTS=web but site/models/weights.json is missing or unusable")
+    _log("model: no usable weights (bundle stale or missing, no browser weights) — retraining from corpus")
     _run([sys.executable, "-m", "qorgan.classifier.linear_train"])
-    if not _linear_backend_works():
+    if _linear_source() is None:
         raise RuntimeError("linear backend still failing after retrain")
     _log("model: retrained, linear backend OK")
+    return "retrained"
 
 
 def ensure_l2_seeds() -> None:
-    if (PROCESSED / "organizations.jsonl").exists():
+    # Through the config, not os.environ / a repo path: a deployment passes the key in an env
+    # file the config loader reads, and may move the data dir (compose.yaml, docs/DEPLOY.md).
+    from qorgan.config import get_config
+
+    cfg = get_config()
+    if (cfg.data_dir / "processed" / "organizations.jsonl").exists():
         _log("L2 seeds: present")
         return
-    if not os.environ.get("QORGAN_NUMBER_HMAC_KEY", "").strip():
+    if cfg.number_hmac_key is None:
         # Seeded numbers are stored as HMAC digests (ADR D14). Without the runtime key
         # (never baked into an image) seeding is deferred to the first start.
         _log("L2 seeds: skipped -- QORGAN_NUMBER_HMAC_KEY not set (seeds on first start with the key)")
@@ -177,14 +203,31 @@ def ensure_embedder() -> None:
         _log(f"web model: WARNING {target} is incomplete and is not the Hub graph -- nothing downloaded")
 
 
-def ensure_web_weights() -> None:
-    """Copy the bundle's exported head weights next to the embedder for the browser."""
-    weights = MODEL_DIR / "web" / "weights.json"
-    if weights.exists():
-        (SITE_MODELS / "weights.json").write_bytes(weights.read_bytes())
-        _log("web model: head weights in place")
+def _web_weights_usable(path: Path) -> bool:
+    from qorgan.classifier.web_bundle import load_linear_from_web
+
+    try:
+        load_linear_from_web(path)
+    except Exception:  # noqa: BLE001 -- any failure means "cannot be served as is"
+        return False
+    return True
+
+
+def ensure_web_weights(source: str = "bundle") -> None:
+    """The browser's head weights. The committed `site/models/weights.json` is the shipped
+    model and is never overwritten while it is usable (developers publish a retrain explicitly
+    with `scripts/export_parity_fixtures.py`). Only a missing or unusable file is replaced, and
+    only by the export of a bundle that is valid now (`source` "bundle" or "retrained")."""
+    target = SITE_MODELS / "weights.json"
+    exported = MODEL_DIR / "web" / "weights.json"
+    if target.exists() and _web_weights_usable(target):
+        _log("web model: committed head weights kept")
+        return
+    if source in ("bundle", "retrained") and exported.exists():
+        target.write_bytes(exported.read_bytes())
+        _log("web model: head weights exported from the trained bundle")
     else:
-        _log("web model: no exported head weights (run python -m qorgan.classifier.web_bundle)")
+        _log("web model: no usable head weights (retrain, then scripts/export_parity_fixtures.py)")
 
 
 def ensure_asr_models() -> None:
@@ -211,9 +254,9 @@ def main() -> None:
     ensure_corpus()
     ensure_dialogue_pool()
     ensure_embedder()  # first: everything below embeds through it
-    ensure_model()
+    source = ensure_model()
     ensure_l2_seeds()
-    ensure_web_weights()
+    ensure_web_weights(source)
     ensure_asr_models()
     _log("done — serve with: uvicorn qorgan.api:app --host 0.0.0.0 --port $PORT")
 

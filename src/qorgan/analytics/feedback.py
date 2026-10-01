@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from qorgan.data.schema import Organization
 from qorgan.data.scrub import scrub_text
+from qorgan.atomic import write_text_atomic
 
 FEEDBACK_FILENAME = "org_feedback.jsonl"
 DISMISSED_PRIORITY_FACTOR = 0.2
@@ -114,7 +115,7 @@ def forget_in_feedback(path: Path, *, incident_id: str, number_hash: str | None,
         changed += cleaned != event
         kept.append(cleaned)
     if changed:
-        path.write_text("".join(e.model_dump_json() + "\n" for e in kept), encoding="utf-8")
+        write_text_atomic(path, "".join(e.model_dump_json() + "\n" for e in kept))
     return changed
 
 

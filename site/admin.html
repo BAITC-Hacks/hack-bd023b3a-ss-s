@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="only light">
 <!-- This page holds an analyst key: no inline or third-party script may run here. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
-<title>Qorğan — analyst dashboard</title>
-<meta name="description" content="Qorğan analyst dashboard — clustered scam organizations, priority queue, novelty flags. A human always decides.">
+<title>Qorğan — analyst console</title>
+<meta name="description" content="Qorğan analyst console — scam organizations clustered from consented reports, a priority queue, novelty flags. A human always decides.">
 <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="%230E0C13"/><g fill="%23E29B2E"><rect x="7" y="13" width="2.6" height="6"/><rect x="11.4" y="9" width="2.6" height="14"/><rect x="15.8" y="5" width="2.6" height="22"/><rect x="20.2" y="10" width="2.6" height="12"/><rect x="24.6" y="14" width="2.6" height="4"/></g></svg>'>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- PT Serif carries Cyrillic (Russian/Kazakh) content: Fraunces has none. -->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=IBM+Plex+Mono:wght@400;500&family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="admin.css">
 </head>
@@ -29,20 +31,24 @@
     </svg>
     <span class="brand-word">qorğan.</span>
   </a>
-  <nav class="nav-links mono" aria-label="Primary">
-    <a href="index.html#how">how it works</a>
-    <a href="admin.html" aria-current="page">admin</a>
-    <a href="live.html">live call</a>
+  <nav class="nav-links mono" data-i18n-attr="aria-label:nav.primary_aria" aria-label="Primary">
+    <a href="index.html#how" data-i18n="nav.how">How it works</a>
+    <a href="admin.html" aria-current="page" data-i18n="nav.analyst">Analyst console</a>
+    <a href="live.html" data-i18n="nav.live">Check a call</a>
   </nav>
-  <a class="btn btn-fill btn-nav" href="index.html#try">Try Qorğan</a>
+  <div class="lang-switch mono" role="radiogroup" aria-label="Тіл · Язык · Language">
+    <label class="lang-opt" lang="kk" title="Қазақша"><input type="radio" name="adm-lang" value="kk" aria-label="Қазақша"><span aria-hidden="true">ҚАЗ</span></label>
+    <label class="lang-opt" lang="ru" title="Русский"><input type="radio" name="adm-lang" value="ru" aria-label="Русский"><span aria-hidden="true">РУС</span></label>
+    <label class="lang-opt" lang="en" title="English"><input type="radio" name="adm-lang" value="en" aria-label="English" checked><span aria-hidden="true">ENG</span></label>
+  </div>
 </header>
 
 <main id="top" class="adm-main">
 
   <section class="col-wide adm-hero">
-    <p class="eyebrow">Level 2 &middot; analyst view</p>
+    <p class="eyebrow">Level 2 &middot; analyst console</p>
     <h1 class="display-2">Scam <em>organizations</em>, ranked.</h1>
-    <p class="body-copy">Confirmed incidents clustered by phone-number co-occurrence and
+    <p class="body-copy">Incidents from consented reports, clustered by phone-number co-occurrence and
     tactic profile into a priority queue for the analyst &mdash; never an automatic
     verdict. A human always decides.</p>
     <div class="adm-session mono" id="admSession" hidden>
@@ -50,9 +56,11 @@
       <button type="button" id="admSignOut" class="tw-chip">sign out</button>
     </div>
     <div class="adm-toolbar mono" id="admToolbar" hidden>
-      <span class="tw-loc">
-        <label class="tw-chip tw-radio"><input type="radio" name="adm-loc" value="ru" checked>ru</label>
-        <label class="tw-chip tw-radio"><input type="radio" name="adm-loc" value="kk">kk</label>
+      <span class="adm-toolbar-label" id="admLocLabel">content language</span>
+      <span class="tw-loc" role="radiogroup" aria-labelledby="admLocLabel">
+        <label class="tw-chip tw-radio" lang="ru"><input type="radio" name="adm-loc" value="ru" checked>ru</label>
+        <label class="tw-chip tw-radio" lang="kk"><input type="radio" name="adm-loc" value="kk">kk</label>
+        <label class="tw-chip tw-radio" lang="en"><input type="radio" name="adm-loc" value="en">en</label>
       </span>
       <button type="button" id="admRefresh" class="tw-chip">refresh</button>
       <button type="button" id="admIngest" class="tw-chip">ingest reports</button>
@@ -88,8 +96,8 @@
     <div class="st-grid" id="admStats"></div>
   </section>
 
-  <section class="col-wide section">
-    <p class="eyebrow">Priority queue</p>
+  <section class="col-wide section" aria-labelledby="admQueueTitle">
+    <p class="eyebrow" id="admQueueTitle">Priority queue</p>
     <div class="adm-queue-tools mono">
       <input id="admSearch" class="adm-search" type="search"
         placeholder="search name or number…" aria-label="Search organizations">
@@ -109,7 +117,7 @@
   <div class="adm-modal-backdrop" id="admModalBackdrop"></div>
   <div class="adm-modal-card panel dd-panel" role="dialog" aria-modal="true" aria-labelledby="admModalTitle">
     <div class="p-head mono">
-      <span class="p-dot" id="admModalDot"></span>
+      <span class="p-dot" id="admModalDot" aria-hidden="true"></span>
       <span class="p-title" id="admModalTitle">organization</span>
       <button type="button" class="adm-modal-close mono" id="admModalClose" aria-label="Close">&#10005;</button>
     </div>
@@ -119,15 +127,16 @@
 
 <footer class="footer">
   <div class="col foot-row mono">
-    <span>Qorğan &mdash; scam-pattern detection &middot; kk &middot; ru</span>
+    <span>Qorğan &mdash; phone-scam pattern detection &middot; kk &middot; ru</span>
     <nav class="foot-links" aria-label="Footer">
-      <a href="index.html">home</a>
-      <a href="live.html">live call</a>
-      <a href="index.html#eval">eval report</a>
+      <a href="index.html">Home</a>
+      <a href="live.html">Check a call</a>
+      <a href="index.html#eval">Evaluation</a>
     </nav>
   </div>
 </footer>
 
 <script src="admin.js"></script>
+<script type="module" src="admin-lang.js"></script>
 </body>
 </html>

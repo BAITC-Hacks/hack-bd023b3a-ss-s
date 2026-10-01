@@ -1,18 +1,32 @@
-.git
-.venv
-venv
-__pycache__
-*.pyc
-*.egg-info
-.pytest_cache
-.ruff_cache
-.DS_Store
-.env
-models/
-data/raw/
-data/synthetic/
-data/processed/
-data/cache/
-notebooks/
-error.txt
-Qorgan_transcript.md
+# The build context is an ALLOWLIST (docs/DEPLOY.md): only what the runtime image needs is
+# sent to the builder. Everything else -- secrets (.env, key files), personal data
+# (data/processed: citizen reports, audit log, Level-2 seeds), the unpublishable raw corpus
+# (data/synthetic), local model bundles (models/), node_modules, tests and the Streamlit dev
+# harness (app/, ADR D4) -- never reaches an image layer.
+*
+!pyproject.toml
+!README.md
+!src
+!site
+!configs
+!data
+!scripts
+
+# Re-excluded inside the allowed directories.
+data/processed
+data/synthetic
+data/raw
+data/real
+data/cache
+data/asr_capture/_wav
+scripts/spikes
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.DS_Store
+**/.env
+**/.env.*
+**/*.sqlite
+**/*.db
+**/*.pem
+**/*.key

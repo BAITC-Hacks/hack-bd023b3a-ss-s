@@ -29,12 +29,14 @@ from qorgan.partners import Partner, PartnerRegistry
 from qorgan.privacy.numbers import MissingHmacKeyError
 from qorgan.reports.model import CONSENT_BASIS_PATTERN, PARTNER_REFERENCE_PATTERN, RECEIPT_ID_PATTERN, StoredReport
 from qorgan.reports.partner import find_partner_report, partner_reports_since
-from qorgan.reports.store import REPORTS_FILENAME, append_report, load_reports, prepare_report
+from qorgan.reports.store import REPORTS_FILENAME, REPORTS_LOCK, append_report, load_reports, prepare_report
 from qorgan.taxonomy import get_taxonomy
 
 router = APIRouter(prefix="/api/v1", tags=["partner"])
 
 API_KEY_HEADER = "X-API-Key"
+# Refusals name the problem, never the value (a 422 travels back through proxies and logs).
+_NUMBER_NOT_UNDERSTOOD = "caller number not understood: expected a phone number with at least 7 digits"
 _MAX_TRANSCRIPT_CHARS = 20_000
 _MAX_TACTICS = 32
 # `occurred_at` may not be in the future (beyond clock skew) nor older than retention.
@@ -134,9 +136,10 @@ class PartnerReportIn(BaseModel):
     @field_validator("tactic_ids")
     @classmethod
     def _known_tactics(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        unknown = sorted(set(value) - set(get_taxonomy().tactic_ids()))
-        if unknown:
-            raise ValueError(f"unknown tactic ids: {unknown}")
+        known = set(get_taxonomy().tactic_ids())
+        unknown = [position for position, tactic_id in enumerate(value) if tactic_id not in known]
+        if unknown:  # positions, never the values
+            raise ValueError(f"unknown tactic ids at positions {unknown}")
         return tuple(dict.fromkeys(value))  # de-duplicated, order kept
 
     @model_validator(mode="after")
@@ -199,50 +202,54 @@ def submit(req: PartnerReportIn, response: Response, partner: Partner = Depends(
             detail=f"occurred_at must be within the last {cfg.report_retention_days} days and not in the future",
         )
 
-    reports = load_reports(reports_path)  # one scan per request: quota + idempotency
-    quota = _quota(reports, partner, cfg, now)
-    existing = find_partner_report(reports, partner_id=partner.id, reference=req.partner_reference)
-    if existing is not None:
-        record_partner_action(partner, "report.submit", subject=f"receipt:{existing.receipt_id}", outcome="duplicate", cfg=cfg, now=now)
-        _set_quota_headers(response, quota)
-        response.status_code = 200
-        return _to_out(existing, status="duplicate", quota=quota)
+    # Read (quota + idempotency) and append are one step: without the lock, parallel retries of
+    # one `partner_reference` each found no earlier copy and each stored one, and a parallel
+    # burst overran the quota (QA 2026-09-29). Lock order: reports, then the audit log.
+    with REPORTS_LOCK:
+        reports = load_reports(reports_path)  # one scan per request: quota + idempotency
+        quota = _quota(reports, partner, cfg, now)
+        existing = find_partner_report(reports, partner_id=partner.id, reference=req.partner_reference)
+        if existing is not None:
+            record_partner_action(partner, "report.submit", subject=f"receipt:{existing.receipt_id}", outcome="duplicate", cfg=cfg, now=now)
+            _set_quota_headers(response, quota)
+            response.status_code = 200
+            return _to_out(existing, status="duplicate", quota=quota)
 
-    if quota.remaining <= 0:
-        record_partner_action(partner, "report.submit", subject=None, outcome="rejected:quota", cfg=cfg, now=now)
-        raise HTTPException(
-            status_code=429,
-            detail=f"daily quota of {quota.limit} reports exhausted for this partner",
-            headers=_quota_headers(quota),
-        )
+        if quota.remaining <= 0:
+            record_partner_action(partner, "report.submit", subject=None, outcome="rejected:quota", cfg=cfg, now=now)
+            raise HTTPException(
+                status_code=429,
+                detail=f"daily quota of {quota.limit} reports exhausted for this partner",
+                headers=_quota_headers(quota),
+            )
 
-    try:
-        stored = prepare_report(
-            transcript=req.transcript or "",
-            phone_number=req.phone_number,
-            flagged_phrases=req.flagged_phrases,
-            tactic_ids=req.tactic_ids,
-            timestamp=req.occurred_at or now,
-            risk_score=req.risk_score,
-            hmac_key=cfg.number_hmac_key,
-            source="partner",
-            consent_basis=req.consent_basis,
-            partner_id=partner.id,
-            partner_reference=req.partner_reference,
-            received_at=now,
-        )
-    except MissingHmacKeyError as exc:  # misconfigured server: refuse, never store raw
-        record_partner_action(partner, "report.submit", subject=None, outcome="rejected:no_hashing_key", cfg=cfg, now=now)
-        raise HTTPException(
-            status_code=503, detail="reports with a caller number are not accepted: server has no number-hashing key"
-        ) from exc
-    except ValueError as exc:  # unparseable number
-        record_partner_action(partner, "report.submit", subject=None, outcome="rejected:bad_number", cfg=cfg, now=now)
-        raise HTTPException(status_code=422, detail=f"caller number not understood: {exc}") from exc
+        try:
+            stored = prepare_report(
+                transcript=req.transcript or "",
+                phone_number=req.phone_number,
+                flagged_phrases=req.flagged_phrases,
+                tactic_ids=req.tactic_ids,
+                timestamp=req.occurred_at or now,
+                risk_score=req.risk_score,
+                hmac_key=cfg.number_hmac_key,
+                source="partner",
+                consent_basis=req.consent_basis,
+                partner_id=partner.id,
+                partner_reference=req.partner_reference,
+                received_at=now,
+            )
+        except MissingHmacKeyError as exc:  # misconfigured server: refuse, never store raw
+            record_partner_action(partner, "report.submit", subject=None, outcome="rejected:no_hashing_key", cfg=cfg, now=now)
+            raise HTTPException(
+                status_code=503, detail="reports with a caller number are not accepted: server has no number-hashing key"
+            ) from exc
+        except ValueError as exc:  # unparseable number -- not echoed back
+            record_partner_action(partner, "report.submit", subject=None, outcome="rejected:bad_number", cfg=cfg, now=now)
+            raise HTTPException(status_code=422, detail=_NUMBER_NOT_UNDERSTOOD) from exc
 
-    # Audit first: if the line cannot be written the report is not stored (503).
-    record_partner_action(partner, "report.submit", subject=f"receipt:{stored.receipt_id}", outcome="stored", cfg=cfg, now=now)
-    append_report(stored, reports_path)
+        # Audit first: if the line cannot be written the report is not stored (503).
+        record_partner_action(partner, "report.submit", subject=f"receipt:{stored.receipt_id}", outcome="stored", cfg=cfg, now=now)
+        append_report(stored, reports_path)
     charged = QuotaOut(limit=quota.limit, used=quota.used + 1, remaining=quota.remaining - 1, window_hours=quota.window_hours)
     _set_quota_headers(response, charged)
     return _to_out(stored, status="stored", quota=charged)
@@ -255,21 +262,22 @@ def delete(receipt_id: str, partner: Partner = Depends(require_partner)) -> Resp
     cfg = get_config()
     now = datetime.now(UTC)
     processed = cfg.data_dir / "processed"
-    owned = any(
-        r.receipt_id == receipt_id and r.partner_id == partner.id for r in load_reports(processed / REPORTS_FILENAME)
-    )
-    if not owned:  # someone else's receipt looks exactly like an unknown one
-        record_partner_action(partner, "report.delete", subject=f"receipt:{receipt_id}", outcome="not_found", cfg=cfg, now=now)
-        raise HTTPException(status_code=404, detail="unknown receipt")
-    # Audit first: if the line cannot be written the report is kept (503).
-    record_partner_action(partner, "report.delete", subject=f"receipt:{receipt_id}", outcome="deleted", cfg=cfg, now=now)
-    forget_report(
-        receipt_id,
-        reports_path=processed / REPORTS_FILENAME,
-        incidents_path=processed / "incidents.jsonl",
-        organizations_path=processed / "organizations.jsonl",
-        embeddings_path=processed / "incident_embeddings.npz",
-    )
+    with REPORTS_LOCK:  # ownership check, audit line and deletion are one step
+        owned = any(
+            r.receipt_id == receipt_id and r.partner_id == partner.id for r in load_reports(processed / REPORTS_FILENAME)
+        )
+        if not owned:  # someone else's receipt looks exactly like an unknown one
+            record_partner_action(partner, "report.delete", subject=f"receipt:{receipt_id}", outcome="not_found", cfg=cfg, now=now)
+            raise HTTPException(status_code=404, detail="unknown receipt")
+        # Audit first: if the line cannot be written the report is kept (503).
+        record_partner_action(partner, "report.delete", subject=f"receipt:{receipt_id}", outcome="deleted", cfg=cfg, now=now)
+        forget_report(
+            receipt_id,
+            reports_path=processed / REPORTS_FILENAME,
+            incidents_path=processed / "incidents.jsonl",
+            organizations_path=processed / "organizations.jsonl",
+            embeddings_path=processed / "incident_embeddings.npz",
+        )
     return Response(status_code=204)
 
 

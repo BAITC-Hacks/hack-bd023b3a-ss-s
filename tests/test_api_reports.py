@@ -138,3 +138,36 @@ def test_a_client_timestamp_outside_the_retention_window_is_refused(client, tmp_
     (stored,) = load_reports(_reports_file(tmp_path))
     assert stored.received_at is not None and abs((stored.received_at - now).total_seconds()) < 60
     assert res.json()["expires_at"] > now.isoformat()
+
+
+# --- QA pass 2026-09-29: refusals never echo input; partner reports are not citizen-deletable ----
+
+
+def test_refusals_never_echo_the_number_or_unknown_tactic_ids(client):
+    """A 422 goes back through proxies and client logs: it names the problem, never the value."""
+    res = client.post("/api/reports", json=_submission(phone_number="Иван 12-34"))
+    assert res.status_code == 422
+    assert "Иван" not in res.text and "12-34" not in res.text
+
+    res = client.post("/api/reports", json=_submission(tactic_ids=["otp_request", "+77012345678"]))
+    assert res.status_code == 422
+    assert "77012345678" not in res.text
+
+
+def test_the_citizen_route_cannot_delete_a_partner_report(client, tmp_path):
+    """A partner report is deleted only by its partner, authenticated and audited
+    (`DELETE /api/v1/reports/{receipt}`); its receipt is also written, in clear, into the audit
+    log -- so the unauthenticated citizen route must treat it as unknown."""
+    from datetime import UTC, datetime
+
+    from qorgan.reports.store import append_report, prepare_report
+
+    partner_report = prepare_report(
+        transcript="", phone_number=None, flagged_phrases=(), tactic_ids=("otp_request",),
+        timestamp=datetime.now(UTC), risk_score=100.0, hmac_key=None, source="partner",
+        consent_basis="customer_consent", partner_id="bank_a", partner_reference="CASE-1",
+    )
+    append_report(partner_report, _reports_file(tmp_path))
+
+    assert client.delete(f"/api/reports/{partner_report.receipt_id}").status_code == 404
+    assert [r.receipt_id for r in load_reports(_reports_file(tmp_path))] == [partner_report.receipt_id]

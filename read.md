@@ -15,7 +15,7 @@
 > and the call never leaves her device unless she chooses to send a report.
 
 **Under the hood:** on-device decision support for phone-scam (social-engineering) calls in
-Kazakh, Russian and code-switched speech. Speech recognition, the language model and the
+Kazakh, Russian, code-switched and English speech. Speech recognition, the language model and the
 classifier all run in the browser. The server never receives audio and only sees what the
 citizen explicitly sends.
 
@@ -72,6 +72,8 @@ speakerphone audio → speech-to-text (on device) → rolling window of the conv
   - It waits for the 3rd utterance before latching, unless a hard signal fires.
   - One confident hard signal lifts the meter to at least 61 (High); two lift it to at
     least 81 (Critical).
+- **One model everywhere:** the server scores with the same committed weights file the
+  browser downloads, so a verdict is the same wherever it is computed.
 
 ---
 
@@ -158,16 +160,21 @@ picture of the gang. A person always checks before anything happens.
 
 ---
 
-## 7. It speaks Kazakh and Russian
+## 7. It speaks Kazakh, Russian and English
 
-**Simply:** Grandma can speak Kazakh, Russian, or mix both in one sentence. Qorğan
-understands all three, and its buttons and advice talk to her in her language.
+**Simply:** Grandma can speak Kazakh, Russian, or mix both in one sentence, and her grandson
+might get the same trick in English. Qorğan understands all of them, and its buttons and advice
+talk to each person in their language.
 
 **Under the hood:**
-- The training data is split evenly across Russian, Kazakh and mixed calls.
+- The training data covers Russian, Kazakh and mixed calls in roughly equal parts, plus English
+  calls set in Kazakhstan (Kaspi, Halyk, eGov, tenge) — "Kazakhstan in English", not a US corpus.
+- English is the newest and weakest language: against an independent English dataset it catches
+  0.739 of scams but raises false alarms on 0.227 of legitimate calls (mostly pushy sales calls),
+  so it is not yet at Russian/Kazakh quality.
 - Two speech recognisers run with a per-utterance vote.
-- The interface comes in **қазақша / русский / English**. Switching language mid-call
-  re-renders the advice already on screen without restarting the call.
+- The interface, the advice and the explanations come in **қазақша / русский / English**.
+  Switching language mid-call re-renders the advice already on screen without restarting the call.
 
 ---
 
@@ -178,11 +185,11 @@ tricky, like a real bank calling about a real card. Qorğan practised on them li
 Then we tested it on calls it had never seen.
 
 **Under the hood:**
-- **1,911 synthetic dialogues.**
+- **2,200 synthetic dialogues** (Russian, Kazakh, mixed and English).
   - Generated with Gemini (self-instruct), then **re-labelled independently** by a second pass
     that never saw the prompt.
   - Scrubbed of personal data, deduplicated, and split deterministically.
-- **Training set:** 1,642 calls, 724 scams and 918 legitimate calls, and every one of those
+- **Training set:** 1,880 calls, 896 scams and 984 legitimate calls, and every one of those
   legitimate calls is a hard negative.
   - It includes speech-recognition-styled copies (lowercase, no punctuation, numbers as words),
     so the model learns what recognised speech looks like.
@@ -197,26 +204,26 @@ Then we tested it on calls it had never seen.
 
 **Simply:** On tests written in the same style as the practice calls, Qorğan catches almost
 every trick and never scares anyone for nothing. On a test written by a *different* teacher,
-it catches about **1 in 3** tricks. We say that out loud, because pretending would be worse.
+it catches a bit under **half** of the tricks. We say that out loud, because pretending would be worse.
 
 **Under the hood:** threshold 0.59, device embeddings, 95 % Clopper–Pearson intervals.
 
 | Test set | What it is | False alarms (FPR) | Scams caught (recall) |
 |---|---|---|---|
-| test | same generator as training | **0.000** [0.000, 0.070] | 0.984 |
+| test | same generator as training (ru, kk, mixed, en; n=143) | **0.000** [0.000, 0.060] | 1.000 |
 | authored_heldout | hand-written calls | **0.000** [0.000, 0.142] | 0.889 |
 | ood | disfluent, out-of-distribution | **0.000** [0.000, 0.049] | 0.932 |
-| adversarial | rewrites without cue words | — | 0.945 |
-| **shift** | **a different generator** | 0.061 [0.007, 0.202] | **0.364** [0.204, 0.549] |
+| **shift** | **a different generator** | 0.030 [0.001, 0.158] | **0.455** [0.281, 0.636] |
 
 - **The cloud second opinion** (Gemini 2.5 Pro, only on the citizen's request) catches
   **33 / 33** on `shift` with **0 / 33** false alarms. This is the trade-off: *privacy tier on
   the device, accuracy tier on request.*
-- **Live meter:** median **3 utterances** to an alert.
+- **Live meter:** on the test calls it raises the alarm on 0.988 of scams and falsely on 0.050 of
+  legitimate calls; the alarm usually comes by the 3rd utterance.
 - **Speed:**
   - about 7 ms per transcript on a laptop CPU;
   - in the browser, about 3 s to load the model and about 0.6 s for the first check.
-- **Engineering quality:** 1,214 Python tests and 60 JavaScript tests, plus real-browser
+- **Engineering quality:** 1,250 Python tests and 60 JavaScript tests, plus real-browser
   end-to-end checks.
 
 ---
@@ -250,7 +257,9 @@ grown-up experts (lawyers, native speakers, banks) to check our work.
 | Next step | Why |
 |---|---|
 | A locked real-call test set (60 legitimate / 40 scam, "scored, never read") | The only way to know real-world accuracy. The intake pipeline is ready; it needs partner data and legal sign-off |
-| Close the cross-generator gap (recall 0.364) | Real calls, a third data generator, or distilling the cloud tier's judgement |
+| Close the cross-generator gap (recall 0.455) | Real calls, a third data generator, or distilling the cloud tier's judgement |
+| Teach it real banks' own warnings | A bank saying "never tell anyone the SMS code" can still trip the meter — the training data has almost no such calls |
+| English sales-call negatives | English false alarms (0.227 on an independent set) are pushy but legitimate sales calls |
 | Android client | Phones can't use microphone mode yet. The benchmark target: a 3 GB-RAM phone running both recognisers at ≤ 2× real time |
 | Redact numbers spoken as words | The recogniser writes "восемь семьсот…", which the scrubber doesn't catch yet |
 | Job, romance and tech-support tactics | Common scams without their own tags |
@@ -263,13 +272,13 @@ grown-up experts (lawyers, native speakers, banks) to check our work.
 
 | | |
 |---|---|
-| Languages | Kazakh, Russian, code-switched |
+| Languages | Kazakh, Russian, code-switched, English (newest, weakest) |
 | Tactics detected | 15 |
-| Training / evaluation data | 1,911 synthetic dialogues (+ adversarial and cross-generator sets) |
+| Training / evaluation data | 2,200 synthetic dialogues (+ adversarial and cross-generator sets) |
 | On-device model | multilingual-e5-base, int8 ONNX, 278 MB (+ ~106 MB speech models) |
 | Alert threshold | risk ≥ 0.59 (hysteresis 0.59 / 0.49) |
 | False alarms on test sets | 0.000 (test, hand-written, out-of-distribution) |
-| Honest cross-generator recall | 0.364 on device · 33 / 33 with the cloud second opinion |
+| Honest cross-generator recall | 0.455 on device · 33 / 33 with the cloud second opinion |
 | Median time to alert | 3 utterances |
 | Report retention | 180 days, server clock, automatic purge |
 | Who decides | always a person |

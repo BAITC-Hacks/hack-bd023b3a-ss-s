@@ -1,0 +1,75 @@
+# Qorğan -- production-like local deployment. Full runbook: docs/DEPLOY.md.
+#
+#   docker compose up -d --build        build and start -> http://127.0.0.1:8000
+#   docker compose ps                   state and health
+#   docker compose logs -f qorgan       server log (access log off by default)
+#   docker compose exec qorgan python -m qorgan.audit verify
+#
+# Secrets stay in the env file (default ./.env, gitignored; see .env.example). It is mounted
+# read-only where the app loads it (python-dotenv, src/qorgan/config.py) -- never baked into
+# the image and never injected as container environment, so neither `docker inspect` nor
+# Docker Desktop's Inspect tab nor `docker compose config` shows a secret. After editing it:
+# `docker compose up -d --force-recreate` (a plain restart may keep the old file content).
+
+name: qorgan
+
+services:
+  qorgan:
+    build:
+      context: .
+    image: qorgan:${QORGAN_IMAGE_TAG:-local}
+    environment:
+      # Deployment invariants; they win over the env file (dotenv never overrides them).
+      QORGAN_CLASSIFIER_BACKEND: linear
+      QORGAN_LINEAR_WEIGHTS: web        # serve exactly the head weights the browser ships (ADR D55)
+      QORGAN_EMBED_BACKEND: onnx
+      QORGAN_DATA_DIR: /app/data        # the data volume is mounted at /app/data/processed
+      QORGAN_MODEL_DIR: /app/models
+    ports:
+      # Loopback only: there is no TLS here, and the analyst console must not be reachable from
+      # the network without it (docs/DEPLOY.md, "Before a public deployment").
+      # QORGAN_BIND_ADDR=0.0.0.0 only behind an HTTPS proxy on another host (scripts/deploy_remote.sh).
+      - "${QORGAN_BIND_ADDR:-127.0.0.1}:${QORGAN_HOST_PORT:-8000}:8000"
+    volumes:
+      # Citizen reports, the audit log, the Level-2 seeds and org feedback. Survives restarts,
+      # rebuilds and `docker compose down`; `docker compose down -v` ERASES it.
+      - qorgan-data:/app/data/processed
+      - type: bind
+        source: ${QORGAN_ENV_FILE:-./.env}
+        target: /app/.env
+        read_only: true
+        bind:
+          create_host_path: false       # a missing env file is an error, not an empty directory
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    # Everything but the data volume and /tmp is read-only; no privileges, no capabilities.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 2g
+          pids: 512
+    # The check itself (GET /api/health) comes from the image's HEALTHCHECK.
+    healthcheck:
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+      start_interval: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  qorgan-data:
+    name: qorgan-data

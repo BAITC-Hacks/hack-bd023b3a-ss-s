@@ -376,3 +376,39 @@ def test_forget_keeps_a_digest_other_incidents_still_carry(seeded):
     [event] = load_feedback(feedback_path)
     assert hashed(KNOWN_NUMBER) in event.org.numbers
     assert report_incident_id(draft) not in event.org.members and set(event.org.members) == {"a0", "a1"}
+
+
+def test_a_deletion_during_an_ingest_is_not_undone_by_it(seeded):
+    """Regression (QA 2026-09-29): ingest reads the pending reports, embeds them (seconds, on the
+    server's ONNX model), then writes the incident stream. A citizen deletion that landed while
+    it was embedding removed the report, found no incident yet, and was then undone when ingest
+    wrote the deleted report's incident back. Ingest and deletion are serialised now."""
+    import threading
+
+    paths, _ = seeded
+    draft = _draft()
+    _write_reports(paths["reports"], [draft])
+    embedding, release = threading.Event(), threading.Event()
+
+    class _SlowEmbedder(_FakeEmbedder):
+        def encode(self, texts, **kwargs):
+            embedding.set()
+            release.wait(timeout=5)
+            return super().encode(texts, **kwargs)
+
+    ingest = threading.Thread(target=_ingest, args=(paths, _SlowEmbedder()))
+    ingest.start()
+    assert embedding.wait(timeout=5)
+    deletion = threading.Thread(target=_forget, args=(paths, draft.receipt_id))
+    deletion.start()
+    deletion.join(timeout=0.3)  # the deletion arrives while the ingest is still embedding
+    release.set()
+    ingest.join(timeout=10)
+    deletion.join(timeout=10)
+
+    from qorgan.reports.store import load_reports
+
+    assert load_reports(paths["reports"]) == []
+    assert report_incident_id(draft) not in {i.id for i in load_incidents_jsonl(paths["incidents"])}
+    members = {m for org in load_organizations_jsonl(paths["organizations"]) for m in org.members}
+    assert report_incident_id(draft) not in members

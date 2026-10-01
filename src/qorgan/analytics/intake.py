@@ -13,11 +13,12 @@ Never called automatically — the analyst clicks "Ingest into analysis" (human-
 
 from __future__ import annotations
 
+import functools
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
@@ -34,9 +35,27 @@ from qorgan.analytics.pipeline import (
 from qorgan.data.incident_seed import load_incidents_jsonl, write_incidents_jsonl
 from qorgan.data.schema import Incident
 from qorgan.reports.model import StoredReport, report_to_incident
-from qorgan.reports.store import load_reports, remove_report
+from qorgan.reports.store import REPORTS_LOCK, load_reports, remove_report
 
 _ID_HASH_CHARS = 10
+_T = TypeVar("_T")
+
+
+def _serialised(fn: Callable[..., _T]) -> Callable[..., _T]:
+    """Run `fn` under the reports lock (re-entrant, shared with report writes and the purge).
+
+    Ingest reads the pending reports, embeds them (seconds on the server's ONNX model) and only
+    then writes the incident stream; a deletion that landed in between removed the report,
+    found no incident yet, and was undone when ingest wrote the incident back (QA 2026-09-29).
+    Single worker (see Dockerfile): an in-process lock is the whole story.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> _T:
+        with REPORTS_LOCK:
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 class Placement(BaseModel):
@@ -93,6 +112,7 @@ def pending_reports(reports_path: Path, incidents: Sequence[Incident]) -> list[S
     return pending
 
 
+@_serialised
 def ingest_pending(
     *,
     reports_path: Path,
@@ -160,6 +180,7 @@ class ForgetSummary(BaseModel):
     organizations_total: int = Field(ge=0)
 
 
+@_serialised
 def forget_report(
     receipt_id: str,
     *,

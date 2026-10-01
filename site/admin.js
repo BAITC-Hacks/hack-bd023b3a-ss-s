@@ -151,18 +151,36 @@
     });
   };
 
+  // A real <button> in each sortable header (keyboard + screen readers); the header carries
+  // aria-sort for the active column.
   const headerRow = (columns, sort) =>
     columns
       .map((c) => {
         if (!c.value) return `<th scope="col">${esc(c.label)}</th>`;
         const active = c.key === sort.key;
         const ind = active ? (sort.dir === 1 ? "▲" : "▼") : "▼";
+        const ariaSort = active ? ` aria-sort="${sort.dir === 1 ? "ascending" : "descending"}"` : "";
         return (
-          `<th scope="col" class="sortable${active ? " is-sorted" : ""}" data-key="${esc(c.key)}">` +
-          `${esc(c.label)}<span class="sort-ind">${ind}</span></th>`
+          `<th scope="col" class="sortable${active ? " is-sorted" : ""}" data-key="${esc(c.key)}"${ariaSort}>` +
+          `<button type="button" class="adm-sortbtn" data-sort="${esc(c.key)}">${esc(c.label)}` +
+          `<span class="sort-ind" aria-hidden="true">${ind}</span></button></th>`
         );
       })
       .join("");
+
+  // Re-rendering a table replaces its buttons; keep keyboard focus on the equivalent control.
+  const focusedControl = (root) => {
+    const el = document.activeElement;
+    if (!el || !root.contains(el)) return null;
+    for (const attr of ["sort", "openOrg", "expand"]) if (el.dataset[attr]) return [attr, el.dataset[attr]];
+    return null;
+  };
+  const restoreFocus = (root, control) => {
+    if (!control) return;
+    const [attr, value] = control;
+    const name = attr.replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
+    root.querySelector(`[data-${name}="${CSS.escape(value)}"]`)?.focus();
+  };
 
   const toggleSort = (sort, columns, key) => {
     const col = columns.find((c) => c.key === key);
@@ -225,10 +243,14 @@
       showEmpty(queueWrap, "No organizations match — clear the search or filter.");
       return;
     }
+    const focused = focusedControl(queueWrap);
+    // The whole row opens the organization for a pointer; the name is a real button, so the
+    // queue works from the keyboard too.
     const rows = visible
       .map(
         (o) => `<tr data-org="${esc(o.id)}" class="${o.id === selectedId ? "is-selected" : ""}">` +
-          `<td>${esc(o.name)}${o.is_novel ? '<span class="queue-badge">NEW</span>' : ""}${feedbackBadge(o.feedback)}</td>` +
+          `<td><button type="button" class="adm-rowbtn" data-open-org="${esc(o.id)}">${esc(o.name)}</button>` +
+          `${o.is_novel ? '<span class="queue-badge">NEW</span>' : ""}${feedbackBadge(o.feedback)}</td>` +
           `<td>${o.priority.toFixed(2)}</td>` +
           `<td>${o.incidents}</td>` +
           `<td>${o.numbers.length}</td>` +
@@ -237,9 +259,10 @@
       .join("");
     queueWrap.className = "";
     queueWrap.innerHTML =
-      `<table class="eval-table queue-table mono"><thead><tr>` +
+      `<div class="table-scroll" tabindex="0" role="region" aria-label="Priority queue table"><table class="eval-table queue-table mono"><thead><tr>` +
       headerRow(QUEUE_COLUMNS, queueSort) +
-      `</tr></thead><tbody>${rows}</tbody></table>`;
+      `</tr></thead><tbody>${rows}</tbody></table></div>`;
+    restoreFocus(queueWrap, focused);
     queueWrap.querySelectorAll("th.sortable").forEach((th) => {
       th.addEventListener("click", () => {
         queueSort = toggleSort(queueSort, QUEUE_COLUMNS, th.dataset.key);
@@ -254,11 +277,15 @@
   // ── modal shell ──────────────────────────────────────────────────────────────
 
   let lastFocus = null;
+  // While the dialog is open the page behind it is inert: Tab stays in the dialog and a screen
+  // reader cannot wander into the queue underneath.
+  const background = [document.querySelector("header.nav"), document.querySelector("main"), document.querySelector("footer")].filter(Boolean);
 
   const openModal = () => {
     if (!modal.hidden) return;
     lastFocus = document.activeElement;
     modal.hidden = false;
+    background.forEach((el) => { el.inert = true; });
     document.body.style.overflow = "hidden";
     modalClose.focus();
   };
@@ -266,9 +293,14 @@
   const closeModal = () => {
     if (modal.hidden) return;
     modal.hidden = true;
+    background.forEach((el) => { el.inert = false; });
     document.body.style.overflow = "";
     expandedCall = null;
-    if (lastFocus?.focus) lastFocus.focus();
+    // The queue may have been re-rendered meanwhile: fall back to the same organization's button.
+    const target = lastFocus?.isConnected
+      ? lastFocus
+      : selectedId && queueWrap.querySelector(`[data-open-org="${CSS.escape(selectedId)}"]`);
+    target?.focus?.();
   };
 
   // ── drill-down (inside the modal): org header + searchable calls table ───────
@@ -280,7 +312,7 @@
       : '<span class="tw-dim">none linked</span>';
     const tactics = detail.tactics.length
       ? detail.tactics
-          .map((t) => `<span class="tw-tag">${esc(t.name)}&nbsp;&middot;&nbsp;${t.count}</span>`)
+          .map((t) => `<span class="tw-tag" lang="${locale()}">${esc(t.name)}&nbsp;&middot;&nbsp;${t.count}</span>`)
           .join("")
       : '<span class="tw-dim">none</span>';
     const script = detail.representative_script
@@ -354,7 +386,7 @@
         ? a.tags
             .map(
               (t) =>
-                `<div class="ec-row dd-rank-row"><span class="ec-name">${esc(t.name)}</span>` +
+                `<div class="ec-row dd-rank-row"><span class="ec-name" lang="${locale()}">${esc(t.name)}</span>` +
                 `<span class="ec-bar"><i style="--w:${((t.weight / maxWeight) * 100).toFixed(0)}%"></i></span>` +
                 `<span class="ec-val">${t.weight.toFixed(2)}</span></div>`
             )
@@ -423,26 +455,31 @@
     const visible = visibleCalls();
     noteEl.textContent =
       (visible.length === total ? `${total} calls` : `${visible.length} of ${total} calls`) +
-      " · click a call for the model analysis";
+      " · select a call for the model analysis";
     if (!visible.length) {
       callsEl.innerHTML = '<p class="tw-dim mono">no calls match</p>';
       return;
     }
+    const focused = focusedControl(callsEl);
+    // As in the queue: the row is the pointer target, the date is the keyboard one.
     const rows = visible
       .map((c) => {
         const expanded = c.id === expandedCall;
+        const date = esc(c.date || "—");
         return (
           `<tr data-incident="${esc(c.id)}" data-has-transcript="${c.has_transcript === false ? "0" : "1"}" class="${expanded ? "is-expanded" : ""}">` +
-          `<td>${esc(c.date || "—")}</td><td>${esc(c.number || "—")}</td>` +
+          `<td>${c.has_transcript === false ? date : `<button type="button" class="adm-rowbtn" data-expand="${esc(c.id)}" aria-expanded="${expanded}">${date}</button>`}</td>` +
+          `<td>${esc(c.number || "—")}</td>` +
           `<td>${(c.risk * 100).toFixed(0)}%</td><td>${c.has_transcript === false ? '<span class="tw-dim">signals only — partner report without a transcript</span>' : esc(c.excerpt)}</td></tr>` +
           (expanded ? analysisBlock(c.id) : "")
         );
       })
       .join("");
     callsEl.innerHTML =
-      `<table class="dd-samples mono"><thead><tr>` +
+      `<div class="table-scroll" tabindex="0" role="region" aria-label="Calls of this organization"><table class="dd-samples mono"><thead><tr>` +
       headerRow(CALL_COLUMNS, callSort) +
-      `</tr></thead><tbody>${rows}</tbody></table>`;
+      `</tr></thead><tbody>${rows}</tbody></table></div>`;
+    restoreFocus(callsEl, focused);
     callsEl.querySelectorAll("th.sortable").forEach((th) => {
       th.addEventListener("click", () => {
         callSort = toggleSort(callSort, CALL_COLUMNS, th.dataset.key);

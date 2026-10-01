@@ -26,7 +26,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from qorgan.api_admin import router as admin_router
 from qorgan.api_admin_stats import router as admin_stats_router
-from qorgan.api_limits import BodySizeLimitMiddleware, CrossOriginIsolationMiddleware, validation_error_handler
+from qorgan.api_limits import (
+    BodySizeLimitMiddleware,
+    CrossOriginIsolationMiddleware,
+    RevalidateShellMiddleware,
+    SecurityHeadersMiddleware,
+    validation_error_handler,
+)
 from qorgan.api_live import router as live_router
 from qorgan.api_partner import router as partner_router
 from qorgan.api_partner_export import router as partner_export_router
@@ -40,11 +46,26 @@ from qorgan.reports.purge import PurgeSchedule
 _SITE_DIR = Path(os.environ.get("QORGAN_SITE_DIR", Path(__file__).resolve().parents[2] / "site"))
 _MAX_TRANSCRIPT_CHARS = 20_000
 
+def _configure_logging(level: str) -> None:
+    """Uvicorn configures only its own loggers, so `qorgan.*` INFO lines (a purge run, a weights
+    fallback) used to vanish (QA 2026-09-29). Attach one stderr handler unless the host already
+    configured logging (then records propagate to it and nothing is printed twice)."""
+    import logging
+
+    logger = logging.getLogger("qorgan")
+    logger.setLevel(level)
+    if not logging.getLogger().handlers and not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logger.addHandler(handler)
+
+
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Retention is the server's own job: purge at startup and every
     `QORGAN_REPORT_PURGE_INTERVAL_HOURS` (0 = leave it to cron). Single worker (see Dockerfile)."""
     cfg = get_config()
+    _configure_logging(cfg.log_level)
     schedule = PurgeSchedule(cfg) if cfg.report_purge_interval_hours > 0 else None
     if schedule is not None:
         schedule.start()
@@ -63,7 +84,9 @@ app = FastAPI(
 )
 # Request hygiene for every route: bounded bodies, 422s that never echo the payload.
 app.add_middleware(BodySizeLimitMiddleware)
+app.add_middleware(RevalidateShellMiddleware)  # site files: no stale JS/CSS next to fresh HTML
 app.add_middleware(CrossOriginIsolationMiddleware)  # live.html only: on-device ASR needs SharedArrayBuffer
+app.add_middleware(SecurityHeadersMiddleware)  # every response: no framing, no sniffing, no referrer
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 
 
@@ -73,7 +96,7 @@ class AnalyzeRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     transcript: str = Field(min_length=1, max_length=_MAX_TRANSCRIPT_CHARS)
-    locale: Literal["ru", "kk"] = "ru"
+    locale: Literal["ru", "kk", "en"] = "ru"  # the reviewed content locales (ADR D52)
     backend: str | None = None
     # Only for the cloud second opinion (`llm`): the requester's explicit consent to sending the
     # text to Google, outside Kazakhstan (`qorgan.cloud_tier`). Ignored by local backends.
@@ -112,11 +135,19 @@ class AnalyzeResponse(BaseModel):
 @app.get("/api/health")
 def health() -> dict[str, object]:
     cfg = get_config()
-    return {
+    body: dict[str, object] = {
         "status": "ok",
         "configured_backend": cfg.classifier_backend,
         "threshold": cfg.risk_threshold,
     }
+    if cfg.classifier_backend == "linear":
+        # Which heads score here: the trained bundle, the committed browser weights, or none
+        # (then /api/analyze degrades to `mock` and says so per response).
+        try:
+            body["linear_model_source"] = predict.linear_model_source()
+        except Exception:  # noqa: BLE001 -- health must answer; the reason is in the server log
+            body["linear_model_source"] = "unavailable"
+    return body
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
@@ -130,8 +161,12 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     fallback = False
     try:  # never cache: this route persists nothing, on any backend
         result = predict.score(req.transcript, backend=req.backend, use_cache=False)
-    except (predict.UnknownBackendError, ValueError):
-        raise
+    except predict.UnknownBackendError as exc:  # a caller error, not a server one; never echo it
+        raise HTTPException(
+            status_code=422, detail=f"unknown classifier backend; expected one of {list(predict.SUPPORTED_BACKENDS)}"
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="the transcript could not be scored") from exc
     except Exception:  # configured backend unavailable here (weights/keys) — degrade honestly
         result = predict.score(req.transcript, backend="mock")
         fallback = True

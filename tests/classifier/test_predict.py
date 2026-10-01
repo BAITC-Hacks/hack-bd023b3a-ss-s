@@ -115,7 +115,10 @@ def test_score_unknown_backend_raises_unknown_backend_error():
 
 
 def test_score_linear_backend_missing_model_raises(monkeypatch, tmp_path):
+    # No trained bundle AND no browser weights: nothing to serve (a missing bundle alone falls
+    # back to the committed browser weights -- tests/classifier/test_web_serving.py).
     monkeypatch.setenv("QORGAN_LINEAR_MODEL_DIR", str(tmp_path / "no_linear"))
+    monkeypatch.setenv("QORGAN_WEB_WEIGHTS_PATH", str(tmp_path / "no_weights.json"))
     predict._LINEAR_BUNDLE_CACHE.clear()
     with pytest.raises(FileNotFoundError):
         predict.score("Продиктуйте код из SMS", backend="linear")

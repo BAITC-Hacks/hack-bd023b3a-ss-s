@@ -470,3 +470,73 @@ def test_feedback_validation(client: TestClient, tmp_path, monkeypatch) -> None:
     assert client.post("/api/admin/organizations/org_1/feedback", json={"action": "promote"}).status_code == 422
     assert client.post("/api/admin/organizations/org_1/feedback", json={"action": "confirm", "note": "caller +7 700 555 66 77"}).status_code == 422
     assert not (tmp_path / "processed" / "org_feedback.jsonl").exists()
+
+
+# --- QA pass 2026-09-29: English is a content locale (ADR D52) on the console too --------------
+
+
+def test_english_is_a_console_locale(client: TestClient, tmp_path, monkeypatch) -> None:
+    incidents = [_incident("i1", tags=("impersonation_bank",), transcript=SCAM_TRANSCRIPT)]
+    org = Organization(id="org_0", members=("i1",))
+    _seed_analysis(tmp_path, monkeypatch, organizations=[org], incidents=incidents)
+
+    overview = client.get("/api/admin/overview", params={"locale": "en"})
+    analysis = client.get("/api/admin/incidents/i1/analysis", params={"locale": "en", "backend": "mock"})
+    stats = client.get("/api/admin/stats", params={"locale": "en"})
+
+    assert overview.status_code == 200 and analysis.status_code == 200 and stats.status_code == 200
+    name = overview.json()["organizations"][0]["name"]
+    assert name and not any("а" <= ch <= "я" for ch in name.lower())  # the English tactic name
+    assert analysis.json()["reason"]
+
+
+def test_feedback_racing_a_deletion_leaves_no_trace_of_the_deleted_report(
+    client: TestClient, tmp_path, monkeypatch
+) -> None:
+    """Regression (QA 2026-09-29): the feedback route snapshots an organization, audits (an
+    fsync), then appends. A citizen's deletion landing in between cleaned the feedback file
+    first -- and the event appended afterwards still named the deleted incident."""
+    import threading
+
+    import numpy as np
+
+    import qorgan.api_admin as api_admin
+    from qorgan.analytics.intake import forget_report, report_incident_id
+    from qorgan.analytics.pipeline import save_embeddings_npz
+    from qorgan.reports.store import append_report
+
+    number = "+7 700 101 20 30"
+    report = stored_report(number=number, receipt_id="d" * 24)
+    reported = report_incident_id(report)
+    incidents = [_incident(reported, number=number), _incident("i2", number=number)]
+    org = Organization(id="org_0", members=(reported, "i2"), numbers=(hashed(number),))
+    _seed_analysis(tmp_path, monkeypatch, organizations=[org], incidents=incidents)
+    processed = tmp_path / "processed"
+    append_report(report, processed / "citizen_reports.jsonl")
+    save_embeddings_npz([reported, "i2"], np.zeros((2, 8), dtype=np.float32), processed / "incident_embeddings.npz")
+
+    auditing, release = threading.Event(), threading.Event()
+    real_record = api_admin.record_analyst_action
+
+    def slow_record(*args, **kwargs):
+        auditing.set()
+        release.wait(timeout=5)
+        return real_record(*args, **kwargs)
+
+    monkeypatch.setattr(api_admin, "record_analyst_action", slow_record)
+    statuses: list[int] = []
+    feedback = threading.Thread(target=lambda: statuses.append(
+        client.post("/api/admin/organizations/org_0/feedback", json={"action": "confirm"}).status_code))
+    feedback.start()
+    assert auditing.wait(timeout=5)
+    deletion = threading.Thread(target=lambda: forget_report(
+        report.receipt_id, reports_path=processed / "citizen_reports.jsonl", incidents_path=processed / "incidents.jsonl",
+        organizations_path=processed / "organizations.jsonl", embeddings_path=processed / "incident_embeddings.npz"))
+    deletion.start()
+    deletion.join(timeout=0.3)  # the deletion arrives while the feedback is being audited
+    release.set()
+    feedback.join(timeout=10)
+    deletion.join(timeout=10)
+
+    assert statuses == [200]
+    assert reported not in (processed / "org_feedback.jsonl").read_text(encoding="utf-8")
