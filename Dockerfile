@@ -12,6 +12,9 @@
 #   answers 503) and, for partners, QORGAN_PARTNER_API_KEYS.
 # - ONE worker, one replica, on purpose: rate limits, the investigator's open budget and the
 #   retention purge schedule are in-process state. Never scale past 1 on the same data volume.
+# - Portable to managed builders (Railway, docs/DEPLOY.md §8): no BuildKit cache mounts
+#   (Railway refuses a cache mount whose id lacks its service prefix), no `COPY --exclude`
+#   (unknown to older Dockerfile frontends), no `HEALTHCHECK --start-interval`.
 
 ARG PYTHON_IMAGE=python:3.11-slim
 
@@ -25,6 +28,7 @@ FROM ${PYTHON_IMAGE} AS deps
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
     PIP_ROOT_USER_ACTION=ignore
 # libgomp1: OpenMP runtime for the scikit-learn / onnxruntime wheels.
 RUN apt-get update \
@@ -32,9 +36,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=requirements /tmp/requirements.txt /tmp/requirements.txt
 COPY scripts/deploy_constraints.txt /tmp/constraints.txt
-# The pip cache is a BuildKit cache mount: rebuilds reuse downloaded wheels, no layer keeps them.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --requirement /tmp/requirements.txt --constraint /tmp/constraints.txt \
+RUN pip install --requirement /tmp/requirements.txt --constraint /tmp/constraints.txt \
  && pip check \
  && rm /tmp/requirements.txt /tmp/constraints.txt
 
@@ -45,8 +47,7 @@ FROM deps AS corpus
 ARG QORGAN_CORPUS_REFRESH=
 WORKDIR /app
 COPY scripts/deploy_bootstrap.py scripts/deploy_bootstrap.py
-RUN --mount=type=cache,target=/root/.cache/huggingface \
-    python -c "import importlib.util as u; s = u.spec_from_file_location('bootstrap', 'scripts/deploy_bootstrap.py'); m = u.module_from_spec(s); s.loader.exec_module(m); m.ensure_corpus()"
+RUN python -c "import importlib.util as u; s = u.spec_from_file_location('bootstrap', 'scripts/deploy_bootstrap.py'); m = u.module_from_spec(s); s.loader.exec_module(m); m.ensure_corpus()"
 
 # --- runtime ---------------------------------------------------------------------------------
 FROM deps AS runtime
@@ -59,29 +60,27 @@ RUN groupadd --system --gid 10001 qorgan \
  && useradd --system --uid 10001 --gid qorgan --home-dir /home/qorgan --create-home --shell /usr/sbin/nologin qorgan
 WORKDIR /app
 
-# Largest and least-changing first, in their own layer: the int8 embedder (~280 MB) and the
-# Vosk speech models (~100 MB). Page, code or head-weight edits never re-copy them.
-COPY --exclude=weights.json site/models ./site/models
 # The published corpus: in data/processed (a new data volume starts from this copy) and a
 # pristine copy the entrypoint refreshes the volume from on every start.
 COPY --chown=10001:10001 --from=corpus /app/data/processed ./data/processed
 COPY --from=corpus /app/data/processed /opt/qorgan/corpus
-# Code, configuration, and the rest of the site (pages, core JS, committed head weights).
+# Code, configuration and the site (pages, core JS, committed head weights, and the embedder /
+# speech models when the build context has them -- otherwise the bootstrap below fetches them).
 COPY pyproject.toml README.md ./
 COPY configs ./configs
 COPY data ./data
 COPY scripts ./scripts
 COPY src ./src
-COPY --exclude=models/Xenova --exclude=models/vosk site ./site
+COPY site ./site
 RUN pip install --no-deps --no-build-isolation --editable . \
  && python -m compileall -q src scripts
 
 # Build-time provisioning, no secret involved: the dialogue pool from the corpus, the embedder
-# and speech models checked (downloaded only when the clone lacks them; the cache mounts keep a
-# rebuild from downloading twice), the linear backend probed on the committed browser weights.
-RUN --mount=type=cache,target=/root/.cache/huggingface \
-    --mount=type=cache,target=/root/.cache/vosk \
-    python scripts/deploy_bootstrap.py
+# and speech models checked (downloaded only when the clone lacks them; the
+# download caches are dropped in the same layer so the image holds each model once), the linear
+# backend probed on the committed browser weights.
+RUN python scripts/deploy_bootstrap.py \
+ && rm -rf /root/.cache/huggingface /root/.cache/vosk
 
 # The running container downloads nothing (the entrypoint keeps the corpus in the volume).
 # Access logs are off: request lines carry client addresses and report receipts. Turn them on
@@ -94,6 +93,6 @@ USER 10001:10001
 EXPOSE 8000
 # Liveness: the API answers. The first start also seeds Level 2 (embeds ~500 demo
 # transcripts), hence the long start period.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --start-interval=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
     CMD ["python", "-c", "import json, os, sys, urllib.request as u; r = u.urlopen('http://127.0.0.1:%s/api/health' % os.environ.get('PORT', '8000'), timeout=4); sys.exit(0 if json.load(r).get('status') == 'ok' else 1)"]
 ENTRYPOINT ["/app/scripts/deploy_entrypoint.sh"]

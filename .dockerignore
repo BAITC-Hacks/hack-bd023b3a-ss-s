@@ -19,6 +19,8 @@ data/raw
 data/real
 data/cache
 data/asr_capture/_wav
+# The static-int8 embedder ADR D18 rejected (local experiments only; ~280 MB).
+site/models/qorgan
 scripts/spikes
 **/__pycache__
 **/*.py[cod]

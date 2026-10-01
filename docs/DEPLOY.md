@@ -295,3 +295,41 @@ right for a laptop demo and wrong for citizens' data. A public deployment needs:
    - Notification under Art. 10-1 above 10,000 subjects.
    - A privacy notice, and the AI-law classification (LEGAL_ASSESSMENT §4).
    - The cloud tier stays `off`: it sends text abroad.
+
+## 8. Railway (the hosted demo)
+
+The hosted demo (`govtech-production.up.railway.app`) builds this same `Dockerfile` from the
+GitHub repository. Railway's builder is stricter than a local BuildKit, and ADR D57 records the
+deploy it failed. `tests/test_dockerfile_portability.py` keeps these rules:
+
+- **No BuildKit cache mounts.** Railway refuses `RUN --mount=type=cache` unless the id carries
+  the hard-coded service id (`id=s/<service-id>-<path>`). The build fails with *"Cache mount ID
+  is not prefixed with cache key"*. Variables do not work in the id, and a hard-coded id would
+  tie the Dockerfile to one service. So downloads go into a normal layer, and the bootstrap
+  `RUN` deletes its download caches in the same layer.
+- **No `COPY --exclude` and no `HEALTHCHECK --start-interval`.** Older Dockerfile frontends
+  reject both (*"unknown flag: exclude"*). Railway ignores `HEALTHCHECK` anyway. Configure the
+  health check in the service settings instead.
+- **The clone has no models.** `site/models/Xenova`, `site/models/vosk` and `site/vendor` are
+  gitignored. On Railway, the bootstrap step of the build downloads them: the embedder from
+  the Hub, and the Vosk models and runtime pinned and hash-checked. This adds about 3 minutes
+  to the build.
+
+Service settings:
+
+| Setting | Value |
+|---|---|
+| Variables | `QORGAN_NUMBER_HMAC_KEY`, `QORGAN_AUDIT_CHAIN_KEY`, `QORGAN_ANALYST_KEYS` (§3). Railway passes them as environment variables, and there is no `.env` file in the container. `PORT` is set by Railway. |
+| Health check | path `/api/health`. The first start seeds Level 2 before the server listens (about 25 s on a laptop CPU). |
+| Replicas | **1** (§1: in-process state) |
+| Volume (optional) | mount it at **`/app/data/processed`**, never at `/app/data`, which holds the lexicons and the taxonomy. Set **`RAILWAY_RUN_UID=0`**. |
+
+**Volumes and the non-root user.** Railway mounts a volume owned by root, and the image runs as
+uid 10001. Started as root (`RAILWAY_RUN_UID=0`), the entrypoint gives the state directory to
+uid 10001 and re-executes itself as that uid through `setpriv`. The server never runs as
+root. Without that variable, the container stops at once with exit code 78 and a message that
+names the fix.
+
+**Without a volume, every redeploy starts empty.** Citizen reports, receipts and the audit
+chain are lost, and the Level-2 seeds are re-created with the current key. That is acceptable
+for a demo with fabricated data, and it is not acceptable for real reports (§7).
