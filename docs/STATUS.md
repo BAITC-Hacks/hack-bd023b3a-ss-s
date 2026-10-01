@@ -76,6 +76,14 @@ kept as history._
   calls with call content: `POST /api/reports`, `DELETE /api/reports/{receipt}`. Model load
   ~3 s from localhost, ~0.6 s first inference (WASM/WebGPU).
 
+## 2026-10-01 — English in the voice mode, test mode (ADR D62)
+
+- A third recogniser (`vosk-model-small-en-us-0.15`) ranks in the vote with a 0.15 handicap.
+  On `val`: English scam calls alert 15/15 through the voice mode (6/15 without it); on
+  kk/ru/mixed the winner changes on 1.0 % of utterances, all in 2 legitimate calls, which
+  removes one false alert and adds none. In the real page: English sentences are tagged
+  "англ", and a Russian scam call is unchanged at 96/100.
+
 ## 2026-10-01 — the microphone in Safari and Firefox (ADR D61)
 
 - "embedding worker failed to load" was WebKit (Safari and every iPhone browser) refusing the

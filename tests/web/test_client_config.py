@@ -136,3 +136,21 @@ def test_export_names_the_on_device_asr_models():
     assert data["asr"]["models"]["kk"] == {"id": cfg.vosk_model_kk, "url": f"vosk/{cfg.vosk_model_kk}.tar.gz"}
     assert data["asr"]["models"]["ru"]["id"] == cfg.vosk_model_ru
     assert data["asr"]["sample_rate"] == cfg.asr_sample_rate
+
+
+def test_english_is_a_third_handicapped_recogniser_and_can_be_switched_off(monkeypatch):
+    # ADR D62: English joins the voice mode last in the vote order, ranked with a handicap so its
+    # confident garbage on kk/ru speech does not win; QORGAN_VOSK_MODEL_EN="" removes it.
+    cfg = get_config()
+    data = export_client_config()
+    # The JSON writer sorts keys (models arrive as en, kk, ru); the vote order travels as a list.
+    assert data["asr"]["order"] == ["kk", "ru", "en"]
+    assert json.loads(json.dumps(data, sort_keys=True))["asr"]["order"] == ["kk", "ru", "en"]
+    assert data["asr"]["models"]["en"] == {"id": cfg.vosk_model_en, "url": f"vosk/{cfg.vosk_model_en}.tar.gz"}
+    assert data["asr"]["handicap"] == {"en": cfg.asr_en_handicap}
+    assert 0 < cfg.asr_en_handicap < 1
+
+    monkeypatch.setenv("QORGAN_VOSK_MODEL_EN", "")
+    off = export_client_config()
+    assert off["asr"]["order"] == ["kk", "ru"] and set(off["asr"]["models"]) == {"kk", "ru"}
+    assert off["asr"]["handicap"] == {}

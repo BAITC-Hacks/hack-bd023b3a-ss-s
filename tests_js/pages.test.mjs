@@ -70,3 +70,14 @@ test("a keyless visitor gets the console only when the server reports open acces
   assert.match(probe, /if \(!body\?\.open_access\) \{\s*showSignin\(\);/);
   assert.doesNotMatch(probe, /X-Analyst-Key/, "the probe carries no key");
 });
+
+// ADR D62: qorgan-config.json is written with sorted keys, so `asr.models` arrives as en, kk, ru.
+// The page must build the recognisers in `asr.order` (kk, ru, en): the first language is the
+// initial preference for ties and the first partial shown.
+test("the live page builds its recognisers in the configured vote order", () => {
+  const js = read("live.js");
+  const specs = js.match(/const modelSpecs = \(cfg\) => \{[\s\S]*?\n\};\n/)?.[0] || "";
+  assert.match(specs, /cfg\.asr\?\.order/);
+  const config = JSON.parse(read("core/qorgan-config.json"));
+  assert.deepEqual(config.asr.order, ["kk", "ru", "en"]);
+});

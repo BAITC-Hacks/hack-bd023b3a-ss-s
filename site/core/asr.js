@@ -65,19 +65,25 @@ export function kazakhLetterShare(text) {
     `hypotheses` (`{language: {text, confidence}}`); empty texts always lose. Confidences
     within `TIE_EPSILON` are a tie: for the kk/ru pair the script decides (the RU model
     cannot emit Kazakh letters; a KK hypothesis with almost none means Russian speech),
-    otherwise the tie goes to `preferred`. */
-export function voteFinal(hypotheses, preferred = null) {
+    otherwise the tie goes to `preferred`. `handicap` (`{language: number}`) is subtracted
+    before ranking (ADR D62: the English model's confident garbage on kk/ru speech); the
+    winner still reports its real confidence. */
+export function voteFinal(hypotheses, preferred = null, handicap = {}) {
   const candidates = Object.entries(hypotheses)
     .filter(([, hyp]) => hyp && hyp.text)
-    .map(([language, hyp]) => ({ language, text: hyp.text, confidence: Math.max(0, hyp.confidence) }))
-    .sort((a, b) => b.confidence - a.confidence);
+    .map(([language, hyp]) => {
+      const confidence = Math.max(0, hyp.confidence);
+      return { language, text: hyp.text, confidence, rank: confidence - (handicap?.[language] ?? 0) };
+    })
+    .sort((a, b) => b.rank - a.rank);
   if (!candidates.length) return null;
-  const tied = candidates.filter((c) => candidates[0].confidence - c.confidence <= TIE_EPSILON);
-  if (tied.length < 2) return candidates[0];
+  const tied = candidates.filter((c) => candidates[0].rank - c.rank <= TIE_EPSILON);
+  const strip = ({ rank, ...hyp }) => hyp;
+  if (tied.length < 2) return strip(candidates[0]);
   const kk = tied.find((c) => c.language === "kk");
   const ru = tied.find((c) => c.language === "ru");
-  if (kk && ru) return kazakhLetterShare(kk.text) >= KAZAKH_SHARE_MIN ? kk : ru;
-  return tied.find((c) => c.language === preferred) || tied[0];
+  if (kk && ru) return strip(kazakhLetterShare(kk.text) >= KAZAKH_SHARE_MIN ? kk : ru);
+  return strip(tied.find((c) => c.language === preferred) || tied[0]);
 }
 
 /** Initial reducer state for `languages` (the first is the initial partial preference). */
@@ -101,7 +107,7 @@ export function initialAsrState(languages) {
     "tick", language?, detail?}`, `now` a timestamp (ms). Returns `{state, emits}` where
     emits are `{type: "partial", language, text}` and `{type: "utterance", language,
     text, confidence}`. Inputs are never mutated. */
-export function reduceAsrEvent(state, event, now, { alignWindowMs = ALIGN_WINDOW_MS, suppressMs = DUPLICATE_SUPPRESS_MS, lock = null } = {}) {
+export function reduceAsrEvent(state, event, now, { alignWindowMs = ALIGN_WINDOW_MS, suppressMs = DUPLICATE_SUPPRESS_MS, lock = null, handicap = null } = {}) {
   if (event.type === "partial") {
     const hyp = parseVoskResult(event.detail);
     const next = { ...state, partials: { ...state.partials, [event.language]: hyp } };
@@ -120,8 +126,8 @@ export function reduceAsrEvent(state, event, now, { alignWindowMs = ALIGN_WINDOW
     if (state.pending[event.language] !== undefined) {
       // This language endpointed twice before the other fired: commit the open window first
       // (voting against the other language's partial), then open a new one -- never overwrite.
-      const closed = commit(state, now, suppressMs, lock);
-      const reopened = reduceAsrEvent(closed.state, event, now, { alignWindowMs, suppressMs, lock });
+      const closed = commit(state, now, suppressMs, lock, handicap);
+      const reopened = reduceAsrEvent(closed.state, event, now, { alignWindowMs, suppressMs, lock, handicap });
       return { state: reopened.state, emits: [...closed.emits, ...reopened.emits] };
     }
     const hyp = parseVoskResult(event.detail);
@@ -132,11 +138,11 @@ export function reduceAsrEvent(state, event, now, { alignWindowMs = ALIGN_WINDOW
       windowOpenedAt: state.windowOpenedAt ?? now,
     };
     const everyLanguageFired = state.languages.every((l) => next.pending[l] !== undefined);
-    return everyLanguageFired ? commit(next, now, suppressMs, lock) : { state: next, emits: [] };
+    return everyLanguageFired ? commit(next, now, suppressMs, lock, handicap) : { state: next, emits: [] };
   }
   if (event.type === "tick") {
     const pruned = pruneSuppressions(state, now);
-    if (pruned.windowOpenedAt !== null && now - pruned.windowOpenedAt >= alignWindowMs) return commit(pruned, now, suppressMs, lock);
+    if (pruned.windowOpenedAt !== null && now - pruned.windowOpenedAt >= alignWindowMs) return commit(pruned, now, suppressMs, lock, handicap);
     return { state: pruned, emits: [] };
   }
   throw new Error(`unknown asr event type: ${event.type}`);
@@ -145,7 +151,7 @@ export function reduceAsrEvent(state, event, now, { alignWindowMs = ALIGN_WINDOW
 /** Vote on what is pending; a language that has not fired contributes its current
     partial (like `FinalResult()` at the other's boundary in the Python design) and its
     next `result` is suppressed as a duplicate. */
-function commit(state, now, suppressMs, lock = null) {
+function commit(state, now, suppressMs, lock = null, handicap = null) {
   const hypotheses = {};
   const suppressUntil = { ...state.suppressUntil };
   for (const language of state.languages) {
@@ -156,7 +162,7 @@ function commit(state, now, suppressMs, lock = null) {
       if (hypotheses[language].text) suppressUntil[language] = now + suppressMs;
     }
   }
-  const winner = voteFinal(hypotheses, state.preferred);
+  const winner = voteFinal(hypotheses, state.preferred, handicap ?? {});
   const next = applyLock({
     ...state,
     pending: {},
@@ -258,18 +264,26 @@ export function loadVoskletScript(url = VOSKLET_SCRIPT_URL, doc = globalThis.doc
     confidence})`, `onStatus(message, {code, language?})` -- `code` is one of runtime | model |
     listening | stopped, so a page can localise the status instead of parsing `message`.
     `start(stream)` takes a microphone MediaStream. */
-export async function createDeviceAsr({ models, onPartial, onUtterance, onStatus = () => {}, onError = () => {}, onRaw = null, lock = null }) {
-  const languages = Object.keys(models);
-  if (!languages.length) throw new Error("no ASR models configured");
+export async function createDeviceAsr({ models, onPartial, onUtterance, onStatus = () => {}, onError = () => {}, onRaw = null, lock = null, handicap = null, optional = [] }) {
+  if (!Object.keys(models).length) throw new Error("no ASR models configured");
   const loadVosklet = await loadVoskletScript();
   onStatus("loading the speech-recognition runtime…", { code: "runtime" });
   const modules = {};
   const loaded = {};
-  for (const language of languages) {
-    modules[language] = await loadVosklet(); // one module instance (= one worker thread) per language
+  for (const language of Object.keys(models)) {
+    const module = await loadVosklet(); // one module instance (= one worker thread) per language
     onStatus(`loading the ${language.toUpperCase()} speech model… (cached after the first time)`, { code: "model", language });
-    loaded[language] = await modules[language].createModel(models[language].url, storagePathFor(language, models[language].id), models[language].id);
+    try {
+      loaded[language] = await module.createModel(models[language].url, storagePathFor(language, models[language].id), models[language].id);
+      modules[language] = module;
+    } catch (err) {
+      // An optional language (English, ADR D62) that cannot load is left out; kk/ru are required.
+      try { await module.cleanUp(); } catch {}
+      if (!optional.includes(language)) throw err;
+      onStatus(`the ${language.toUpperCase()} speech model is unavailable; continuing without it`, { code: "model_skipped", language });
+    }
   }
+  const languages = Object.keys(loaded);
 
   let ctx = null;
   let recognizers = {};
@@ -281,7 +295,7 @@ export async function createDeviceAsr({ models, onPartial, onUtterance, onStatus
   const dispatch = (event) => {
     if (onRaw && event.type !== "tick") onRaw({ ...event, at: performance.now() }); // diagnostics: every recognizer event
     try {
-      const out = reduceAsrEvent(state, event, performance.now(), { lock });
+      const out = reduceAsrEvent(state, event, performance.now(), { lock, handicap });
       state = out.state;
       for (const emit of out.emits) {
         if (emit.type === "partial") onPartial(emit);
@@ -331,7 +345,7 @@ export async function createDeviceAsr({ models, onPartial, onUtterance, onStatus
       // Flush: whatever is pending or still a partial is committed now, so every utterance
       // has been handed to `onUtterance` before `stop()` resolves.
       const flushed = reduceAsrEvent(
-        { ...state, windowOpenedAt: performance.now() - ALIGN_WINDOW_MS }, { type: "tick" }, performance.now()
+        { ...state, windowOpenedAt: performance.now() - ALIGN_WINDOW_MS }, { type: "tick" }, performance.now(), { lock, handicap }
       );
       state = flushed.state;
       for (const emit of flushed.emits) if (emit.type === "utterance") onUtterance(emit);

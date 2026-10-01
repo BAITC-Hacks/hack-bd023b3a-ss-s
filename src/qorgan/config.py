@@ -33,6 +33,11 @@ _DEFAULT_WHISPER_MODEL_SIZE = "small"
 # vote per utterance. Names resolve via vosk's model auto-download (~/.cache/vosk).
 _DEFAULT_VOSK_MODEL_KK = "vosk-model-small-kz-0.42"
 _DEFAULT_VOSK_MODEL_RU = "vosk-model-small-ru-0.22"
+# English joins the browser's voice mode as a third recogniser (ADR D62); "" switches it off.
+# It ranks in the vote with (confidence - handicap): on kk/ru speech the English model returns
+# confident-looking garbage, and a plain vote handed it 12.9 % of kk/ru utterances.
+_DEFAULT_VOSK_MODEL_EN = "vosk-model-small-en-us-0.15"
+_DEFAULT_ASR_EN_HANDICAP = 0.15
 _DEFAULT_ASR_SAMPLE_RATE = 16000
 _DEFAULT_EMBED_MODEL_NAME = "intfloat/multilingual-e5-base"
 # "sentence-transformers" (fp32 PyTorch) or "onnx" (the int8 graph the browser ships;
@@ -144,6 +149,9 @@ class Config(BaseModel):
     whisper_model_size: str
     vosk_model_kk: str
     vosk_model_ru: str
+    # "" = no English recogniser in the voice mode.
+    vosk_model_en: str = ""
+    asr_en_handicap: float = Field(default=_DEFAULT_ASR_EN_HANDICAP, ge=0.0, le=1.0)
     asr_sample_rate: int = Field(gt=0)
     # Language locking (ADR D40): after this many voted utterances only the winning recogniser
     # is fed; 0 = off (the shipped default -- the code-switch cost needs real bilingual audio).
@@ -398,6 +406,8 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
             ),
             vosk_model_kk=_read_str(source, "QORGAN_VOSK_MODEL_KK", _DEFAULT_VOSK_MODEL_KK),
             vosk_model_ru=_read_str(source, "QORGAN_VOSK_MODEL_RU", _DEFAULT_VOSK_MODEL_RU),
+            vosk_model_en=source.get("QORGAN_VOSK_MODEL_EN", _DEFAULT_VOSK_MODEL_EN).strip(),
+            asr_en_handicap=_read_float(source, "QORGAN_ASR_EN_HANDICAP", _DEFAULT_ASR_EN_HANDICAP),
             asr_sample_rate=_read_int(source, "QORGAN_ASR_SAMPLE_RATE", _DEFAULT_ASR_SAMPLE_RATE),
             asr_lock_after=_read_int(source, "QORGAN_ASR_LOCK_AFTER", 0),
             asr_lock_conf_floor=_read_float(source, "QORGAN_ASR_LOCK_CONF_FLOOR", 0.80),
