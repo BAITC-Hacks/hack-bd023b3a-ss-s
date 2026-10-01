@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from qorgan.privacy.numbers import display_prefix, hash_phone_number
-from qorgan.data.schema import Incident, Label
+from qorgan.data.schema import Incident, Label, TacticTag
 
 # Scam risk assigned to every synthesized incident (they are confirmed scams for L2).
 _INCIDENT_RISK = 0.9
@@ -40,6 +40,10 @@ class ScriptFamily:
     is_novel: bool = False
     weight: float = 1.0
     metadata: dict = field(default_factory=dict)
+    # Tactic ids per transcript (parallel to `transcripts`; empty = untagged). A seeded
+    # incident carries the tactics of the dialogue it came from, as a citizen report carries
+    # the tactics the device detected -- the console names organizations by them.
+    transcript_tactics: tuple[tuple[str, ...], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.transcripts:
@@ -78,11 +82,14 @@ def synthesize_incidents(
     incidents: list[Incident] = []
     for index in range(count):
         family = rng.choices(family_list, weights=weights, k=1)[0]
+        # randrange(n) draws exactly what choice(seq) drew (both `_randbelow(n)`): same seeds.
+        pick = rng.randrange(len(family.transcripts))
         incidents.append(
             _build_incident(
                 index=index,
                 family=family,
-                transcript=rng.choice(family.transcripts),
+                transcript=family.transcripts[pick],
+                tactics=family.transcript_tactics[pick] if family.transcript_tactics else (),
                 phone_number=rng.choice(family.phone_numbers),
                 timestamp=_sample_timestamp(rng, start_time, span_seconds, family.is_novel),
                 hmac_key=hmac_key,
@@ -104,6 +111,7 @@ def _build_incident(
     index: int,
     family: ScriptFamily,
     transcript: str,
+    tactics: tuple[str, ...],
     phone_number: str,
     timestamp: datetime,
     hmac_key: bytes,
@@ -112,7 +120,7 @@ def _build_incident(
         id=f"inc_{index:04d}",
         dialogue_id=f"{family.id}_{index}",
         transcript=transcript,
-        label=Label(risk=_INCIDENT_RISK, is_hard_negative=False),
+        label=Label(risk=_INCIDENT_RISK, tactic_tags=tuple(TacticTag(id=t) for t in tactics), is_hard_negative=False),
         number_hash=hash_phone_number(phone_number, key=hmac_key),
         number_prefix=display_prefix(phone_number),
         timestamp=timestamp,

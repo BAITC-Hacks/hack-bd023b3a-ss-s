@@ -239,6 +239,17 @@ def export_linear(bundle: LinearBundle, out_dir: Path) -> dict:
     return metadata
 
 
+def check_embed_backend(trained_backend: str, *, source: str) -> None:
+    """Heads are only valid on the embedding distribution they were fitted on (A4); the
+    device/onnx pair is the documented proxy (ADR D32/D33)."""
+    runtime_backend = get_config().embed_backend
+    if trained_backend != runtime_backend and (trained_backend, runtime_backend) not in _PROXY_BACKENDS:
+        raise LinearFeatureMismatchError(
+            f"{source} was trained on {trained_backend!r} embeddings but QORGAN_EMBED_BACKEND is "
+            f"{runtime_backend!r}; set the backend to match or retrain."
+        )
+
+
 def load_linear(model_dir: Path) -> LinearBundle:
     """Reconstruct a `LinearBundle` from an export dir (raises if absent).
 
@@ -254,15 +265,8 @@ def load_linear(model_dir: Path) -> LinearBundle:
             "`python -m qorgan.classifier.linear_train`."
         )
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    from qorgan.config import get_config
-
     embed_backend = metadata.get("embed_backend", "sentence-transformers")
-    runtime_backend = get_config().embed_backend
-    if embed_backend != runtime_backend and (embed_backend, runtime_backend) not in _PROXY_BACKENDS:
-        raise LinearFeatureMismatchError(
-            f"{model_dir} was trained on {embed_backend!r} embeddings but QORGAN_EMBED_BACKEND is "
-            f"{runtime_backend!r}; set the backend to match or retrain."
-        )
+    check_embed_backend(embed_backend, source=str(model_dir))
     hard_signal_enabled = bool(metadata.get("hard_signal_enabled", False))
     trained_matcher = metadata.get("cue_matcher_version", 1)
     if hard_signal_enabled and trained_matcher != MATCHER_VERSION:

@@ -18,6 +18,7 @@ Backends:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,7 +28,10 @@ from qorgan.data.demo_transcripts import DEMO_TRANSCRIPTS
 from qorgan.data.schema import ScoreResult, Span, TacticTag
 from qorgan.taxonomy import get_taxonomy
 
+_LOGGER = logging.getLogger(__name__)
+
 _SUPPORTED_BACKENDS = ("llm", "xlmr", "linear", "mock")
+SUPPORTED_BACKENDS = _SUPPORTED_BACKENDS
 # How many IG trigger spans to surface for an xlmr verdict.
 _XLMR_ATTRIBUTION_TOP_K = 8
 # `linear` backend: highlight up to this many utterances scoring at/above the margin.
@@ -274,12 +278,43 @@ def _merge_cue_evidence(tags: list, spans: list, cue_matches) -> tuple[list, lis
 
 
 def _get_linear_bundle() -> Any:
+    return _resolve_linear()[0]
+
+
+def linear_model_source() -> str:
+    """Which weights the `linear` backend serves in this process: `"bundle"` (the trained
+    sklearn bundle) or `"web"` (the committed browser weights). Raises like `score` would
+    when neither is usable."""
+    return _resolve_linear()[1]
+
+
+def _resolve_linear() -> tuple[Any, str]:
+    """Load (once per process and configuration) the heads `QORGAN_LINEAR_WEIGHTS` selects.
+
+    `auto` prefers the bundle and falls back to the browser weights only when the bundle is
+    missing or no longer valid for the current lexicons/matcher/embedder -- logged, and
+    visible in `/api/health`, never silent. `web` serves exactly what the device runs."""
     from qorgan.classifier.linear_train import load_linear
+    from qorgan.classifier.web_bundle import load_linear_from_web
 
     cfg = get_config()
-    key = str(cfg.linear_model_dir)
+    key = f"{cfg.linear_weights_source}|{cfg.linear_model_dir}|{cfg.web_weights_path}"
     if key not in _LINEAR_BUNDLE_CACHE:
-        _LINEAR_BUNDLE_CACHE[key] = load_linear(cfg.linear_model_dir)
+        if cfg.linear_weights_source == "web":
+            _LINEAR_BUNDLE_CACHE[key] = (load_linear_from_web(cfg.web_weights_path), "web")
+        elif cfg.linear_weights_source == "bundle":
+            _LINEAR_BUNDLE_CACHE[key] = (load_linear(cfg.linear_model_dir), "bundle")
+        else:
+            try:
+                _LINEAR_BUNDLE_CACHE[key] = (load_linear(cfg.linear_model_dir), "bundle")
+            except Exception as exc:  # noqa: BLE001 -- missing, stale (hash drift), or unloadable (e.g. a pickle from another sklearn)
+                if not cfg.web_weights_path.exists():
+                    raise
+                _LOGGER.warning(
+                    "linear: %s is not usable (%s: %s); serving the committed browser weights %s",
+                    cfg.linear_model_dir, type(exc).__name__, exc, cfg.web_weights_path,
+                )
+                _LINEAR_BUNDLE_CACHE[key] = (load_linear_from_web(cfg.web_weights_path), "web")
     return _LINEAR_BUNDLE_CACHE[key]
 
 

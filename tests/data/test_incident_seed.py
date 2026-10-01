@@ -122,3 +122,29 @@ def test_written_incidents_never_contain_a_raw_pool_number(tmp_path):
         digits = re.sub(r"\D", "", number)
         assert number not in text and digits[-7:] not in text
     assert "number_hash" in text and '"number_prefix":"+7 7' in text
+
+
+def test_seeded_incidents_carry_the_tactics_of_the_dialogue_they_came_from():
+    # The analyst console names an organization by its dominant tactics and draws its tactic
+    # profile from incident labels. Seeds were tagless, so every seeded organization showed a
+    # raw family id and an empty profile (QA 2026-09-29).
+    corpus = _corpus()
+    tags_by_text = {d.transcript(): tuple(t.id for t in d.label.tactic_tags) for d in corpus}
+    incidents = seed_incidents(corpus, count=50, seed=42, start_time=_START, hmac_key=TEST_HMAC_KEY)
+    from_corpus = [i for i in incidents if i.transcript in tags_by_text]
+    assert from_corpus, "the corpus families must be sampled"
+    for incident in from_corpus:
+        assert tuple(t.id for t in incident.label.tactic_tags) == tags_by_text[incident.transcript]
+
+
+def test_carrying_tags_does_not_change_which_incidents_are_seeded():
+    # Same draws as before the change (numbers, times, transcripts): L2 numbers stay comparable.
+    a = seed_incidents(_corpus(), count=40, seed=7, start_time=_START, hmac_key=TEST_HMAC_KEY)
+    b = seed_incidents(_corpus(), count=40, seed=7, start_time=_START, hmac_key=TEST_HMAC_KEY)
+    assert [(i.transcript, i.number_hash, i.timestamp) for i in a] == [(i.transcript, i.number_hash, i.timestamp) for i in b]
+
+
+def test_every_seeded_incident_is_tagged_including_the_novel_scheme():
+    incidents = seed_incidents(_corpus(), count=200, seed=3, start_time=_START, hmac_key=TEST_HMAC_KEY)
+    assert any(i.script_family == "crypto_giveaway_new" for i in incidents)
+    assert all(i.label.tactic_tags for i in incidents)

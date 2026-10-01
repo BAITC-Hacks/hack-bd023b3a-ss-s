@@ -1285,3 +1285,72 @@ we do not serve — but the reassurance and sales-register gaps are real regardl
 `--tag` on `augment_register_diversity.py`, because an untagged rerun **overwrites the committed
 ru/kk/mixed batch** — caught before running it, not after.
 
+
+### D55 — The server scores with the weights the browser ships; a deploy never swaps the model (2026-09-29)
+Found on a fresh pull of `main`. D51/D54 changed the cue lexicon and committed the retrained
+browser weights (`site/models/weights.json`), but the server's sklearn bundle (`models/linear`,
+gitignored) still comes from the Hub, which holds the 2026-09-24 bundle. Its lexicon hash no
+longer matched, so **every server-side score silently fell back to the keyword `mock`**: a
+textbook «…никому не говорите. Продиктуйте код из СМС» call scored **0.05**, and the analyst
+drill-down and the landing widget's server path showed mock verdicts. Worse, the deploy
+bootstrap (run by the Docker build and at every container start) saw the stale bundle,
+**retrained a different model** (older corpus without English, server embeddings) and copied
+its export over the committed browser weights: a deployment would have shipped every browser
+a model nobody evaluated. On Sanzhar's machine nothing failed, because his local bundle is
+current; every other checkout was affected.
+**Change.** `web_bundle.load_linear_from_web` rebuilds a serving `LinearBundle` from the
+browser's JSON: the numpy `WebScorer` (already pinned to sklearn) behind sklearn-shaped heads,
+and the lexicons *embedded in the file* — what the browser computes its features from — after
+checking they match their own recorded hashes, the cue-matcher version and a compatible
+embedder. `QORGAN_LINEAR_WEIGHTS` picks the source: `bundle` (a retrain being evaluated before
+export), `web` (deployments: server and device score identically by construction) or `auto`
+(default: the bundle when it is valid for the current lexicons, else the browser weights — never
+`mock` while a real model exists; logged). `/api/health` reports `linear_model_source`. The
+bootstrap now asks which source serves: when the browser weights serve, it neither retrains nor
+downloads under `web`; it never overwrites usable committed weights (developers publish a
+retrain explicitly with `scripts/export_parity_fixtures.py`); a missing or unusable file is
+replaced only by the export of a bundle that is valid now. The drift test now checks, on every
+checkout, that the committed weights' embedded lexicons are the repo's, and compares against a
+local bundle only when that bundle is current.
+**Evidence.** `tests/classifier/test_web_serving.py` (11: whole-verdict parity with the sklearn
+bundle — risk within 1e-6, identical tags and evidence; tampered lexicon and foreign matcher
+refused; auto/web/bundle policy; health field) and three bootstrap tests (never overwritten,
+replaced only when missing/unusable, no retrain when the browser weights serve). `pytest`
+1250 passed / 11 skipped, `npm test` 60/60. Live server: `linear_model_source: "web"`; the RU
+scam call → `linear`, risk 1.000; an English TeamViewer scam → 1.000 with `remote_access` (the
+D54 cue); the demo hard-negative bank call → 0.007.
+**Not done.** The Hub bundle and corpus are still the 2026-09-24 ones; uploading the current
+bundle, corpus and cards needs the maintainers' token (outward-facing). Until then a fresh
+clone evaluates the committed weights on the older local splits.
+
+### D56 — Measured, not fixed: a bank's own "never share the SMS code" warning can trip the meter (2026-09-29)
+Probing the pulled model with hand-written legitimate calls (written for this check, not from
+any split) through the Python live pipeline (1:1 with the browser):
+
+| probe (legitimate) | meter per utterance | window risk |
+|---|---|---|
+| card ready · «мы никогда не спрашиваем код из СМС и ПИН-код» | 44 · 41 · **61 latched (High)** · 61 · 61 | 0.143 |
+| new-device notice · «Никому не сообщайте код из СМС, даже сотрудникам банка» | 6 · 12 · 37 · **69 latched** · **84 Critical** | 0.986 |
+| the same with Latin «SMS» | identical | 0.998 |
+
+Two mechanisms. (1) The meter's hard-signal floor (61/81) ignores the reassurance counter-signal:
+in the first call the risk head is right (0.143, the reassurance feature fired) but the bare-mention
+cue «код из СМС» alone latches High. (2) «Никому не сообщайте … код» is not reassurance vocabulary,
+so in the second call the risk head itself says scam. The Latin spelling behaves identically, so
+this predates D51; D51 extended it to the Cyrillic spelling real Russian uses.
+**Why no rule change now.** A static count (no model) of dialogues whose cues fire *only* inside
+reassurance-bearing utterances: train — 3 of the 14 legitimate rows that contain any cue (918
+legitimate in total) vs 2 of 180 cue-bearing scams; val — no legitimate row contains a cue, 0 of 11
+cue-bearing scams; **test — no legitimate row contains a cue, 2 of 11 cue-bearing scams**. Muting the floor
+inside reassurance would therefore fix nothing measurable on the evaluation splits and cost the
+instant alert on the "we never ask for your PIN — just read me the SMS code" scams, a known script.
+And «никому не сообщайте код» is itself scammer phrasing («…кроме меня»), so adding it as
+reassurance is exactly the lexicon-only shape D27 and D43 warn against.
+**The finding is a data gap:** only 14 of 918 legitimate training calls contain any hard-signal
+cue, so the model has barely seen a real bank reading out its own security warning. The fix is
+the D27/D42 method: Gemini-generated legitimate bank/operator calls carrying the standard
+warnings (ru/kk/mixed/en; Latin and Cyrillic SMS), then re-measure whether a negation-aware
+floor is still needed. It needs a Gemini key (not available in this workspace) and must not use
+Claude-written text for training (`shift` is Claude-authored). Until then: the demo's
+hard-negative call is unaffected (0.007), and this probe set should become a small,
+ledger-tracked evaluation file once a second author reviews it.

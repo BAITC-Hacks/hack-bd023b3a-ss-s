@@ -18,6 +18,7 @@ from qorgan.data.scrub import scrub_text
 from qorgan.privacy.numbers import display_prefix, hash_phone_number
 from qorgan.reports.model import CITIZEN_CONSENT_BASIS, ReportSource, StoredReport
 from qorgan.reports.retention import is_expired
+from qorgan.atomic import write_text_atomic
 
 # Citizen and partner reports share one file under `<data_dir>/processed/`; the `source`
 # field tells them apart.
@@ -101,8 +102,7 @@ def load_reports(path: Path) -> list[StoredReport]:
 
 
 def _rewrite(reports: Sequence[StoredReport], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(r.model_dump_json() + "\n" for r in reports), encoding="utf-8")
+    write_text_atomic(path, "".join(r.model_dump_json() + "\n" for r in reports))
 
 
 def remove_report(receipt_id: str, path: Path) -> StoredReport | None:

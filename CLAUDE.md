@@ -43,11 +43,16 @@ mic mode uploads audio. Never present it as the product.
   `onnxruntime` is pinned to match transformers.js — do not bump it casually.
 - The bundle hash-validates the lexicons: **any lexicon edit forces a retrain and must come
   with training data.** Upload model + lexicons together (`scripts/hf_upload.py`).
+- **The committed `site/models/weights.json` is the shipped model.** Publish a retrain with
+  `scripts/export_parity_fixtures.py` (copies the export + regenerates fixtures). The server
+  serves the trained bundle when it is current and otherwise these weights
+  (`QORGAN_LINEAR_WEIGHTS=auto`; `web` for deployments, `bundle` to evaluate a retrain before
+  exporting it; ADR D55). `/api/health` → `linear_model_source` says which one is live.
 - **Parity:** `site/core/*.js` is a 1:1 port of the Python classifier, meter, explain, cue
   matcher and scrubber, pinned by golden fixtures. Change both sides, regenerate fixtures
   (`scripts/export_parity_fixtures.py`, `scripts/export_scrub_fixtures.py`), keep `npm test` green.
-- Explanations are verbatim spans + templated RU/KK text (`explain/templates_*.yaml`,
-  `advice_{ru,kk}.yaml`). **Never show LLM prose to the user as an explanation.**
+- Explanations are verbatim spans + templated RU/KK/EN text (`explain/templates_*.yaml`,
+  `advice_{ru,kk,en}.yaml`). **Never show LLM prose to the user as an explanation.**
 - Other backends: `mock` (keyword fallback), `llm` (Gemini cloud second opinion — it sends text
   abroad, so it is off unless `QORGAN_CLOUD_TIER=on`, needs per-request `cloud_consent`, is never
   cached and never used by analyst routes; ADR D49), `xlmr` (abandoned).
@@ -55,8 +60,9 @@ mic mode uploads audio. Never present it as the product.
 ## Evaluation rules
 - **FPR first**, with Clopper–Pearson intervals, per split and per language. No change ships
   if it moves FPR on test / authored / ood / ASR-styled data or the browser gate without an ADR.
-- **The honest number is `shift`** (66 calls from a second generator): recall 0.364. Every other
-  split shares its generator with train. Real calls (`docs/DATA_INTAKE.md`) do not exist yet.
+- **The honest number is `shift`** (66 calls from a second generator): recall 0.455, FPR 0.030
+  (ADR D54). Every other split shares its generator with train. English has no held-out set; its
+  independent-generator FPR is 0.227 (D54). Real calls (`docs/DATA_INTAKE.md`) do not exist yet.
 - **Never tune on held-out data**; never extend the lexicon from `shift` or `authored_heldout`
   (ADRs D35/D43). Any held-out row you read goes into `data/anchors/inspection_ledger.yaml`.
   Paste numbers from harness output, never by hand.

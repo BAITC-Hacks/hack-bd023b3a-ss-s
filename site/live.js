@@ -8,10 +8,12 @@
    model content (tactic names, advice, the summary) is rendered from state -- `call`,
    `lastState` -- in the current language. So switching mid-call re-renders everything in
    place, the session keeps running, and what the citizen typed in the review is untouched.
-   The model's own text (advice, tactic names, templates) exists in ru/kk only; English
-   chrome shows it in Russian (`contentLocale`). */
+   The model's own text (advice, tactic names, templates) comes from the reviewed YAML in
+   kk / ru / en (ADR D52); `contentLocale` falls back to Russian only for a chrome-only locale.
+   The chosen language is shared with the landing page (i18n-dom.js). */
 
-import { CONSENT_VERSION, DEFAULT_LOCALE, LOCALES, STORAGE_KEY, contentLocale, escapeHtml as esc, hasKey, pickLocale, t, tHtml } from "./i18n.js";
+import { CONSENT_VERSION, DEFAULT_LOCALE, LOCALES, contentLocale, escapeHtml as esc, hasKey, pickLocale, t } from "./i18n.js";
+import { browserLanguages, localize as localizeIn, readStoredLocale, renderEl as renderElIn, storeLocale } from "./i18n-dom.js";
 import { displayName, renderReason } from "./core/explain.js";
 import { recommend } from "./core/recommend.js";
 
@@ -68,14 +70,7 @@ const ASR_STATUS = { runtime: "mic.loading_runtime", model: "mic.loading_model",
 
 // ── language ─────────────────────────────────────────────────────────────────
 
-const readStored = () => {
-  try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
-};
-const writeStored = (value) => {
-  try { localStorage.setItem(STORAGE_KEY, value); } catch { /* private mode: the choice lasts this visit */ }
-};
-
-let locale = pickLocale({ stored: readStored(), languages: navigator.languages?.length ? navigator.languages : [navigator.language] });
+let locale = pickLocale({ stored: readStoredLocale(), languages: browserLanguages() });
 let config = null; // core/qorgan-config.json, once the device runtime exists
 const cl = () => contentLocale(locale, config?.locales); // the language the model's content is shown in
 const tr = (key, params = null) => t(locale, key, params);
@@ -92,24 +87,9 @@ class UiError extends Error {
 }
 const reasonOf = (e) => (e instanceof UiError ? { $: e.key, params: e.params } : errText(e));
 
-/** Render one element from its data-i18n / data-i18n-html / data-i18n-attr keys. */
-const renderEl = (el) => {
-  const params = el.dataset.i18nParams ? JSON.parse(el.dataset.i18nParams) : null;
-  if (el.dataset.i18n) el.textContent = t(locale, el.dataset.i18n, params);
-  else if (el.dataset.i18nHtml) el.innerHTML = tHtml(locale, el.dataset.i18nHtml, params);
-  if (el.dataset.i18nAttr) {
-    for (const pair of el.dataset.i18nAttr.split(";")) {
-      const [attr, key] = pair.split(":");
-      el.setAttribute(attr, t(locale, key, params));
-    }
-  }
-};
-
-const SELECTOR = "[data-i18n],[data-i18n-html],[data-i18n-attr]";
-const localize = (root = document) => {
-  if (root !== document && root.matches?.(SELECTOR)) renderEl(root);
-  root.querySelectorAll(SELECTOR).forEach(renderEl);
-};
+/** Render one element / a subtree from its data-i18n* keys (i18n-dom.js) in the current language. */
+const renderEl = (el) => renderElIn(el, locale);
+const localize = (root = document) => localizeIn(root, locale);
 
 /** Bind an element to a page string (text) -- it stays bound across language switches. */
 const bind = (el, key, params = null) => {
@@ -148,7 +128,7 @@ const renderFallbackNotes = () => {
 
 const applyLocale = (next, { persist = true } = {}) => {
   locale = LOCALES.includes(next) ? next : DEFAULT_LOCALE;
-  if (persist) writeStored(locale);
+  if (persist) storeLocale(locale);
   document.documentElement.lang = locale;
   document.querySelectorAll('input[name="lv-lang"]').forEach((radio) => { radio.checked = radio.value === locale; });
   // A session in progress continues in the new language: the session locale only selects

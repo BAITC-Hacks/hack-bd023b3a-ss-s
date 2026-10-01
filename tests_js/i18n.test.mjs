@@ -68,6 +68,28 @@ test("every key the live page uses exists", () => {
   assert.deepEqual(missing, []);
 });
 
+test("every key the landing page uses exists, and it uses the landing keys", () => {
+  const html = read("site", "index.html");
+  const js = read("site", "try.js") + read("site", "landing.js");
+  const used = new Set();
+  for (const m of html.matchAll(/data-i18n(?:-html)?="([^"]+)"/g)) used.add(m[1]);
+  for (const m of html.matchAll(/data-i18n-attr="([^"]+)"/g)) for (const pair of m[1].split(";")) used.add(pair.split(":")[1]);
+  for (const m of js.matchAll(/"((?:landing|lang_name)\.[a-z0-9_]+)"/g)) used.add(m[1]);
+  const missing = [...used].filter((k) => !(k in STRINGS[DEFAULT_LOCALE]));
+  assert.deepEqual(missing, []);
+  const unused = keys(DEFAULT_LOCALE).filter((k) => k.startsWith("landing.") && !used.has(k));
+  assert.deepEqual(unused, [], "landing keys nothing renders");
+});
+
+test("the landing and the citizen page share one language control contract", () => {
+  for (const page of ["index.html", "live.html"]) {
+    const html = read("site", page);
+    const values = [...html.matchAll(/<input type="radio" name="(?:lp|lv)-lang" value="([a-z]+)"/g)].map((m) => m[1]);
+    assert.deepEqual(values, [...LOCALES], `${page}: one radio per locale, in display order`);
+  }
+  assert.match(read("site", "i18n-dom.js"), /STORAGE_KEY/, "the stored choice is the one key both pages read");
+});
+
 test("every demo scenario has a localised label", () => {
   const { scenarios } = JSON.parse(read("site", "core", "scenarios.json"));
   assert.ok(scenarios.length > 0);

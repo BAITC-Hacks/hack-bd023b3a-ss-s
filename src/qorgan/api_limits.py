@@ -84,6 +84,70 @@ _ISOLATION_HEADERS = (
 )
 
 
+# Sent on every response (QA 2026-09-29). The analyst console must never be framed
+# (clickjacking): X-Frame-Options for old browsers, and a CSP header carrying ONLY
+# `frame-ancestors` (it restricts nothing else, and frame-ancestors is ignored in a <meta> CSP).
+# No referrer leaves the site; the microphone stays allowed (the live page's on-device ASR).
+# HSTS belongs on the TLS terminator in front of this server, not here (docs/DEPLOY.md).
+SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"x-frame-options", b"DENY"),
+    (b"content-security-policy", b"frame-ancestors 'none'"),
+    (b"permissions-policy", b"camera=(), geolocation=(), payment=(), usb=()"),
+)
+
+
+class SecurityHeadersMiddleware:
+    """Add `SECURITY_HEADERS` to every HTTP response (replacing any same-named header)."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+            return
+        names = {name for name, _ in SECURITY_HEADERS}
+
+        async def send_with_headers(message: MutableMapping[str, Any]) -> None:
+            if message.get("type") == "http.response.start":
+                headers = [(k, v) for k, v in message.get("headers", []) if k.lower() not in names]
+                message = {**message, "headers": [*headers, *SECURITY_HEADERS]}
+            await send(message)
+
+        await self._app(scope, receive, send_with_headers)
+
+
+# Static site files the browser must revalidate on every load (a 304 via ETag when unchanged).
+# Without a Cache-Control header browsers cache JS/CSS heuristically, so after a deploy the fresh
+# index.html ran against a stale i18n.js / styles.css (raw i18n keys, unstyled controls).
+# /api/ sets its own policy; /models/ are large, versioned files the service worker caches.
+_UNREVALIDATED_PREFIXES = ("/api/", "/models/")
+_REVALIDATE = (b"cache-control", b"no-cache")
+
+
+class RevalidateShellMiddleware:
+    """Add `Cache-Control: no-cache` to site responses that set no cache policy themselves."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") != "http" or str(scope.get("path", "")).startswith(_UNREVALIDATED_PREFIXES):
+            await self._app(scope, receive, send)
+            return
+
+        async def send_with_policy(message: MutableMapping[str, Any]) -> None:
+            if message.get("type") == "http.response.start":
+                headers = list(message.get("headers", []))
+                if not any(k.lower() == b"cache-control" for k, _ in headers):
+                    message = {**message, "headers": [*headers, _REVALIDATE]}
+            await send(message)
+
+        await self._app(scope, receive, send_with_policy)
+
+
 class CrossOriginIsolationMiddleware:
     """Add COOP/COEP to responses for `paths` (exact) and `prefixes`, and nothing else."""
 

@@ -16,6 +16,7 @@ from pathlib import Path
 from qorgan.data.incidents import ScriptFamily, synthesize_incidents
 from qorgan.data.schema import Dialogue, Incident
 from qorgan.data.scrub import scrub_text
+from qorgan.atomic import write_text_atomic
 
 # (family id, tactic ids that define it, operating phone numbers). Each family operates
 # from its own line(s), disjoint across families, so the phone-number co-occurrence graph
@@ -50,6 +51,12 @@ _NOVEL_FAMILY = ScriptFamily(
     phone_numbers=("+7 708 909 10 11",),
     is_novel=True,
     weight=0.6,
+    # Hand-tagged per the taxonomy (demo seed data, never training or evaluation data).
+    transcript_tactics=(
+        ("investment_scam", "payment_redirect"),
+        ("investment_scam", "payment_redirect", "urgency"),
+        ("investment_scam", "payment_redirect", "urgency"),
+    ),
 )
 
 
@@ -68,17 +75,17 @@ def build_families_from_dialogues(dialogues: Sequence[Dialogue]) -> list[ScriptF
     families: list[ScriptFamily] = []
     for family_id, tactics, numbers in _FAMILY_DEFINITIONS:
         tactic_set = set(tactics)
-        transcripts = [
-            scrub_text(d.transcript())
-            for d in scams
-            if {t.id for t in d.label.tactic_tags} & tactic_set
-        ]
+        matched = [d for d in scams if {t.id for t in d.label.tactic_tags} & tactic_set]
+        transcripts = [scrub_text(d.transcript()) for d in matched]
         if not transcripts:
             continue
         families.append(
             ScriptFamily(
                 id=family_id,
                 transcripts=tuple(transcripts[:_MAX_TRANSCRIPTS_PER_FAMILY]),
+                transcript_tactics=tuple(
+                    tuple(t.id for t in d.label.tactic_tags) for d in matched[:_MAX_TRANSCRIPTS_PER_FAMILY]
+                ),
                 phone_numbers=numbers,
                 # weight = full pre-truncation match count (the family's real-world size), so a
                 # family whose pool is capped at _MAX_TRANSCRIPTS_PER_FAMILY still samples
@@ -111,7 +118,7 @@ def seed_incidents(
 def write_incidents_jsonl(incidents: Sequence[Incident], path: Path) -> None:
     """Write incidents as JSONL (one per line), creating parent dirs."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(i.model_dump_json() for i in incidents) + "\n", encoding="utf-8")
+    write_text_atomic(path, "\n".join(i.model_dump_json() for i in incidents) + "\n")
 
 
 def load_incidents_jsonl(path: Path) -> list[Incident]:

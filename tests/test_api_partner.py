@@ -328,3 +328,60 @@ def test_a_deletion_that_cannot_be_audited_is_refused_and_keeps_the_report(clien
     monkeypatch.setattr(api_partner, "append_audit", broken_audit)
     assert client.delete(f"/api/v1/reports/{receipt}", headers=_auth()).status_code == 503
     assert [r.receipt_id for r in load_reports(_reports_file(tmp_path))] == [receipt]
+
+
+# --- QA pass 2026-09-29 ---------------------------------------------------------------------
+
+
+def test_refusals_never_echo_the_number_or_unknown_tactic_ids(client):
+    res = client.post("/api/v1/reports", json=_signals(phone_number="Иван 12-34"), headers=_auth())
+    assert res.status_code == 422
+    assert "Иван" not in res.text and "12-34" not in res.text
+    res = client.post("/api/v1/reports", json=_signals(tactic_ids=["+77012345678"]), headers=_auth())
+    assert res.status_code == 422
+    assert "77012345678" not in res.text
+
+
+def test_parallel_retries_store_one_report_and_parallel_bursts_respect_the_quota(client, tmp_path, monkeypatch):
+    """Regression: idempotency and the quota were read-then-write without a lock, so parallel
+    retries of one `partner_reference` stored duplicates and a parallel burst overran the quota
+    (live server, 2026-09-29: 2-3 copies of one reference; 9-10 reports against a quota of 3)."""
+    import threading
+    import time
+
+    import qorgan.api_partner as api_partner
+
+    real_prepare = api_partner.prepare_report
+
+    def slow_prepare(**kwargs):  # widen the window between reading the file and appending to it
+        time.sleep(0.05)
+        return real_prepare(**kwargs)
+
+    monkeypatch.setattr(api_partner, "prepare_report", slow_prepare)
+
+    def fire(bodies):
+        results: list[int] = []
+        threads = [
+            threading.Thread(target=lambda b=b: results.append(
+                TestClient(app).post("/api/v1/reports", json=b, headers=_auth()).status_code))
+            for b in bodies
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+        return sorted(results)
+
+    statuses = fire([_signals(partner_reference="SAME")] * 6)
+    assert [r.partner_reference for r in load_reports(_reports_file(tmp_path))] == ["SAME"]
+    assert statuses == [200] * 5 + [201]
+
+    statuses = fire([_signals(partner_reference=f"P-{i}") for i in range(6)])
+    assert len(load_reports(_reports_file(tmp_path))) == QUOTA_A  # 1 earlier + 2 more
+    assert statuses.count(201) == QUOTA_A - 1 and statuses.count(429) == 6 - (QUOTA_A - 1)
+
+
+def test_english_is_an_export_locale(client, tmp_path):
+    """ADR D52: English is a reviewed content locale; the aggregates export offers it too."""
+    res = client.get("/api/v1/organizations", params={"locale": "en"}, headers=_auth())
+    assert res.status_code == 200

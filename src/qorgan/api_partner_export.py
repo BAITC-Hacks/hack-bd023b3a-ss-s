@@ -25,7 +25,7 @@ from qorgan.partners import Partner
 
 router = APIRouter(prefix="/api/v1", tags=["partner"])
 
-Locale = Literal["ru", "kk"]
+Locale = Literal["ru", "kk", "en"]  # the reviewed content locales (ADR D52)
 
 
 class TacticCountOut(BaseModel):

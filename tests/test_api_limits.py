@@ -56,3 +56,39 @@ def test_only_the_live_page_and_its_worker_scripts_are_cross_origin_isolated(cli
     for path in ("/", "/admin.html", "/api/health"):
         res = client.get(path)
         assert res.status_code == 200 and "cross-origin-embedder-policy" not in res.headers, path
+
+
+# --- security headers on every response (QA 2026-09-29) ----------------------------------------
+
+
+@pytest.mark.parametrize("path", ["/", "/index.html", "/live.html", "/admin.html", "/api/health", "/core/qorgan-config.json"])
+def test_every_response_refuses_framing_sniffing_and_referrers(path):
+    res = TestClient(app).get(path)
+    assert res.status_code == 200, path
+    assert res.headers["x-content-type-options"] == "nosniff"
+    assert res.headers["referrer-policy"] == "no-referrer"
+    # The analyst console must not be framed (clickjacking); frame-ancestors only works as a header.
+    assert res.headers["x-frame-options"] == "DENY"
+    assert res.headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert "microphone" not in res.headers["permissions-policy"]  # the live page needs the mic
+    assert "camera=()" in res.headers["permissions-policy"]
+
+
+def test_live_page_keeps_its_cross_origin_isolation_next_to_the_security_headers():
+    res = TestClient(app).get("/live.html")
+    assert res.headers["cross-origin-embedder-policy"] == "require-corp"
+    assert res.headers["x-frame-options"] == "DENY"
+
+
+# --- the site shell always revalidates (UI bug 2026-09-30) ---------------------------------------
+# Without Cache-Control the browser caches JS/CSS heuristically, so after a deploy a fresh
+# index.html ran against an old i18n.js / styles.css: raw "landing.title_html" keys and bare radios.
+
+
+@pytest.mark.parametrize("path", ["/", "/index.html", "/admin.html", "/i18n.js", "/i18n-dom.js", "/styles.css", "/landing.js"])
+def test_site_shell_is_revalidated_on_every_load(path):
+    res = TestClient(app).get(path)
+    assert res.status_code == 200, path
+    assert res.headers["cache-control"] == "no-cache"
+    assert "etag" in res.headers  # so revalidation is a cheap 304
+

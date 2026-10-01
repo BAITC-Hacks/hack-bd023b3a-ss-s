@@ -50,7 +50,7 @@ from qorgan.analytics.presentation import (
 from qorgan.config import get_config
 from qorgan.data.incident_seed import load_incidents_jsonl
 from qorgan.data.schema import Incident, Organization
-from qorgan.reports.store import REPORTS_FILENAME
+from qorgan.reports.store import REPORTS_FILENAME, REPORTS_LOCK
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_analyst)])
 
@@ -62,10 +62,11 @@ _MAX_SAMPLE_INCIDENTS = 60
 _EXCERPT_CHARS = 200
 _ELLIPSIS = "…"
 _MAX_NOTE_CHARS = 160
-# Test seam: a deterministic fake embedder is injected here; None means the real
-# sentence-transformers model (downloaded/cached on first ingest).
+# Test seam: a deterministic fake embedder is injected here; None means the configured
+# embedder (`classifier.embed.get_embedder`: the int8 ONNX graph on the server).
 _EMBEDDER_OVERRIDE: Any = None
-Locale = Literal["ru", "kk"]
+# The reviewed content locales (tactic names, reason templates): ru / kk / en since ADR D52.
+Locale = Literal["ru", "kk", "en"]
 
 
 @dataclass(frozen=True)
@@ -326,29 +327,34 @@ def organization_feedback(
 ) -> OrgSummaryOut:
     """Confirm / dismiss / merge an organization (PLAN C6). The event is appended, keyed by
     the operation's numbers (not its re-assigned id), applied at read time, and audited
-    first -- an action the audit log cannot record does not happen."""
-    analysis = _load_analysis()
-    if analysis is None:
-        raise HTTPException(status_code=404, detail="analysis unavailable")
-    by_org = {o.id: o for o in analysis.organizations}
-    org = by_org.get(org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail=f"unknown organization {org_id!r}")
-    target = None
-    if body.action == "merge":
-        target = by_org.get(body.target_org_id or "")
-        if target is None:
-            raise HTTPException(status_code=404, detail=f"unknown target organization {body.target_org_id!r}")
-    outcome = _with_note("ok", body.note)
-    try:
-        event = FeedbackEvent(
-            timestamp=datetime.now(UTC), analyst_id=analyst.id, action=body.action, org=snapshot_for(org),
-            target=snapshot_for(target) if target is not None else None, note=body.note,
-        )
-        record_analyst_action(analyst.id, f"org.{body.action}", subject=f"org:{org.id}", outcome=outcome)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail="feedback must not carry call content or numbers") from exc
-    append_feedback(event, get_config().data_dir / "processed" / FEEDBACK_FILENAME)
+    first -- an action the audit log cannot record does not happen.
+
+    Snapshot and append happen under the reports lock: a citizen's deletion landing in between
+    used to be undone, because the event appended afterwards still named the deleted incident
+    (QA 2026-09-29). Lock order: reports, then the audit log."""
+    with REPORTS_LOCK:
+        analysis = _load_analysis()
+        if analysis is None:
+            raise HTTPException(status_code=404, detail="analysis unavailable")
+        by_org = {o.id: o for o in analysis.organizations}
+        org = by_org.get(org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail=f"unknown organization {org_id!r}")
+        target = None
+        if body.action == "merge":
+            target = by_org.get(body.target_org_id or "")
+            if target is None:
+                raise HTTPException(status_code=404, detail=f"unknown target organization {body.target_org_id!r}")
+        outcome = _with_note("ok", body.note)
+        try:
+            event = FeedbackEvent(
+                timestamp=datetime.now(UTC), analyst_id=analyst.id, action=body.action, org=snapshot_for(org),
+                target=snapshot_for(target) if target is not None else None, note=body.note,
+            )
+            record_analyst_action(analyst.id, f"org.{body.action}", subject=f"org:{org.id}", outcome=outcome)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail="feedback must not carry call content or numbers") from exc
+        append_feedback(event, get_config().data_dir / "processed" / FEEDBACK_FILENAME)
 
     refreshed = _load_analysis()
     survivors = {o.id: o for o in (refreshed.organizations if refreshed else [])}

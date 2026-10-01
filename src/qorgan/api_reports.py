@@ -23,11 +23,14 @@ from qorgan.config import get_config
 from qorgan.privacy.numbers import MissingHmacKeyError
 from qorgan.reports.model import CITIZEN_CONSENT_VERSIONS, RECEIPT_ID_PATTERN
 from qorgan.reports.retention import client_timestamp_in_window, expires_at
-from qorgan.reports.store import REPORTS_FILENAME, append_report, prepare_report
+from qorgan.reports.store import REPORTS_FILENAME, REPORTS_LOCK, append_report, load_reports, prepare_report
 from qorgan.taxonomy import get_taxonomy
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
+# Refusals name the problem, never the value: a 422 travels back through proxies and client
+# logs, and what a citizen typed into the number field may be a name or a card number.
+_NUMBER_NOT_UNDERSTOOD = "caller number not understood: expected a phone number with at least 7 digits"
 _MAX_TRANSCRIPT_CHARS = 20_000
 _MAX_PHONE_CHARS = 32
 _MAX_PHRASES = 50
@@ -82,9 +85,9 @@ class ReportSubmission(BaseModel):
     @classmethod
     def _known_tactics(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         known = set(get_taxonomy().tactic_ids())
-        unknown = sorted(set(value) - known)
-        if unknown:
-            raise ValueError(f"unknown tactic ids: {unknown}")
+        unknown = [position for position, tactic_id in enumerate(value) if tactic_id not in known]
+        if unknown:  # positions, never the values (see _NUMBER_NOT_UNDERSTOOD)
+            raise ValueError(f"unknown tactic ids at positions {unknown}")
         return tuple(dict.fromkeys(value))
 
 
@@ -130,8 +133,8 @@ def submit(req: ReportSubmission, request: Request) -> ReportReceipt:
         raise HTTPException(
             status_code=503, detail="reports with a caller number are not accepted: server has no number-hashing key"
         ) from exc
-    except ValueError as exc:  # unparseable number
-        raise HTTPException(status_code=422, detail=f"caller number not understood: {exc}") from exc
+    except ValueError as exc:  # unparseable number -- not echoed back
+        raise HTTPException(status_code=422, detail=_NUMBER_NOT_UNDERSTOOD) from exc
 
     append_report(stored, cfg.data_dir / "processed" / REPORTS_FILENAME)
     return ReportReceipt(
@@ -150,16 +153,23 @@ def submit(req: ReportSubmission, request: Request) -> ReportReceipt:
 
 @router.delete("/{receipt_id}", status_code=204, response_class=Response)
 def delete(receipt_id: str) -> Response:
+    """Forget a *citizen* report everywhere. A partner report answers like an unknown receipt:
+    only its partner deletes it, authenticated and audited (`DELETE /api/v1/reports/{receipt}`),
+    and partner receipts are written in clear into the audit log."""
     if not _RECEIPT_RE.fullmatch(receipt_id):
         raise HTTPException(status_code=422, detail="malformed receipt id")
     processed = get_config().data_dir / "processed"
-    summary = forget_report(
-        receipt_id,
-        reports_path=processed / REPORTS_FILENAME,
-        incidents_path=processed / "incidents.jsonl",
-        organizations_path=processed / "organizations.jsonl",
-        embeddings_path=processed / "incident_embeddings.npz",
-    )
+    reports_path = processed / REPORTS_FILENAME
+    with REPORTS_LOCK:  # the ownership check and the deletion are one step
+        if not any(r.receipt_id == receipt_id and r.source == "citizen" for r in load_reports(reports_path)):
+            raise HTTPException(status_code=404, detail="unknown receipt")
+        summary = forget_report(
+            receipt_id,
+            reports_path=reports_path,
+            incidents_path=processed / "incidents.jsonl",
+            organizations_path=processed / "organizations.jsonl",
+            embeddings_path=processed / "incident_embeddings.npz",
+        )
     if summary is None:
         raise HTTPException(status_code=404, detail="unknown receipt")
     return Response(status_code=204)

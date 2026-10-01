@@ -1,15 +1,17 @@
 /* Service worker: offline after first load (PLAN_2026-09 B4).
-   - app shell + core modules: cache-first, refreshed in the background;
+   - app shell + core modules: network-first, the cache only when offline. (Stale-while-
+     revalidate served a cached i18n.js/styles.css next to a fresh index.html after a deploy,
+     so the landing showed raw keys like "landing.title_html" and unstyled radios);
    - model files under /models/ (278 MB ONNX + weights.json): cache-first, immutable;
      except /models/vosk/ (speech models, ~106 MB) which Vosklet caches itself;
    - /api/ and anything cross-origin: never cached, never intercepted -- the only network
      traffic with call content is the explicit report submit, and it must stay live. */
 
-const SHELL_CACHE = "qorgan-shell-v4"; // v4: live page in kk/ru/en (i18n.js); v3: report review (D44); v2: COOP/COEP (B9)
+const SHELL_CACHE = "qorgan-shell-v6"; // v6: network-first shell (no mixed versions after a deploy); v5: landing in kk/ru/en (landing.js, i18n-dom.js); v4: live page in kk/ru/en; v3: report review (D44); v2: COOP/COEP (B9)
 const MODEL_CACHE = "qorgan-models-v1";
 const SHELL = [
   "/", "/index.html", "/live.html", "/styles.css", "/live.css", "/main.js", "/live.js", "/try.js",
-  "/i18n.js", "/manifest.webmanifest",
+  "/landing.js", "/i18n.js", "/i18n-dom.js", "/manifest.webmanifest",
   "/core/index.js", "/core/score.js", "/core/head.js", "/core/lexicon.js", "/core/attribution.js",
   "/core/explain.js", "/core/recommend.js", "/core/meter.js", "/core/session.js",
   "/core/embedder.js", "/core/embed-worker.js", "/core/qorgan-config.json", "/core/device.js",
@@ -44,7 +46,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(cacheFirst(MODEL_CACHE, event.request));
     return;
   }
-  event.respondWith(staleWhileRevalidate(SHELL_CACHE, event.request));
+  event.respondWith(networkFirst(SHELL_CACHE, event.request));
 });
 
 async function cacheFirst(cacheName, request) {
@@ -56,12 +58,16 @@ async function cacheFirst(cacheName, request) {
   return response;
 }
 
-async function staleWhileRevalidate(cacheName, request) {
+async function networkFirst(cacheName, request) {
   const cache = await caches.open(cacheName);
-  const hit = await cache.match(request);
-  const refresh = fetch(request).then((response) => {
+  try {
+    // Sub-resources revalidate past the HTTP cache too (a navigation request rejects an init).
+    const response = await (request.mode === "navigate" ? fetch(request) : fetch(request, { cache: "no-cache" }));
     if (response.ok) cache.put(request, response.clone());
     return response;
-  }).catch(() => hit);
-  return hit || refresh;
+  } catch (err) {
+    const hit = await cache.match(request);
+    if (hit) return hit;
+    throw err;
+  }
 }

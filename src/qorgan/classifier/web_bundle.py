@@ -12,6 +12,8 @@ A browser cannot unpickle sklearn, so the heads are flattened to arrays:
 
 `WebScorer` is the Python reference implementation over that JSON. The JS port
 (`site/core/`) must match it on the golden fixtures; it must match sklearn here.
+`load_linear_from_web` turns the same JSON into a serving `LinearBundle`, so the server can
+score with exactly the weights the browser ships (`QORGAN_LINEAR_WEIGHTS`, 2026-09-29).
 """
 
 from __future__ import annotations
@@ -162,6 +164,85 @@ class WebScorer:
 
 def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x))
+
+
+class _WebRiskHead:
+    """sklearn-shaped `predict_proba` over `WebScorer`: `(n, 2)`, column 1 = scam."""
+
+    def __init__(self, scorer: WebScorer) -> None:
+        self._scorer = scorer
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        scam = self._scorer.risk_proba(features)
+        return np.column_stack([1.0 - scam, scam])
+
+
+class _WebTacticHead:
+    """`MultiLabelHead`-shaped `predict_proba` over `WebScorer`: `(n, len(label_space))`."""
+
+    def __init__(self, scorer: WebScorer) -> None:
+        self._scorer = scorer
+
+    def predict_proba(self, embeddings: np.ndarray) -> np.ndarray:
+        return self._scorer.tactic_proba(embeddings)
+
+
+def load_linear_from_web(path: Path) -> Any:
+    """A serving `LinearBundle` rebuilt from the browser's weights JSON.
+
+    The lexicons are the ones *embedded in the file* -- the content these heads were trained
+    with, which is what the browser computes its cue features from -- so the server's
+    features match the device's by construction. The embedded content must still match its
+    own recorded hashes, and the file must come from this build's cue matcher and a
+    compatible embedder; otherwise `LinearFeatureMismatchError`.
+    """
+    from qorgan.classifier.cue_lexicon import CueLexicon, lexicon_hash
+    from qorgan.classifier.linear_train import LinearBundle, LinearFeatureMismatchError, check_embed_backend
+    from qorgan.classifier.reassurance import ReassurancePatterns, reassurance_hash
+
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    scorer = WebScorer.from_dict(data)  # validates format + head type
+    check_embed_backend(data.get("embed_backend", "sentence-transformers"), source=str(path))
+    hard_signal = data.get("lexicon") is not None
+    lexicon = patterns = None
+    cue_hash = reass_hash = ""
+    if hard_signal:
+        if data.get("cue_matcher_version") != MATCHER_VERSION:
+            raise LinearFeatureMismatchError(
+                f"{path} was exported with cue matcher v{data.get('cue_matcher_version')} but this build "
+                f"uses v{MATCHER_VERSION}; re-export the weights from a bundle trained with it"
+            )
+        block = data["lexicon"]
+        # `version` is a schema field of the YAML, not part of the content hash; the JSON
+        # carries the content (and its hash), which is what features are computed from.
+        lexicon = CueLexicon(version=1, entries={tid: tuple(cues) for tid, cues in block["cues"].items()})
+        reassurance = block["reassurance"]
+        patterns = ReassurancePatterns(
+            version=1,
+            sensitive_terms=tuple(reassurance["sensitive_terms"]),
+            reassurance_terms=tuple(reassurance["reassurance_terms"]),
+            window_chars=int(reassurance["window_chars"]),
+        )
+        cue_hash, reass_hash = block["cue_lexicon_hash"], block["reassurance_hash"]
+        if lexicon_hash(lexicon) != cue_hash:
+            raise LinearFeatureMismatchError(f"{path}: the embedded cue lexicon does not match its recorded hash")
+        if reassurance_hash(patterns) != reass_hash:
+            raise LinearFeatureMismatchError(f"{path}: the embedded reassurance patterns do not match their recorded hash")
+    return LinearBundle(
+        risk_clf=_WebRiskHead(scorer),
+        tactic_clf=_WebTacticHead(scorer),
+        label_space=scorer.label_space,
+        embed_model_name=data["embed_model_name"],
+        tactic_threshold=scorer.tactic_threshold,
+        tactic_thresholds=dict(scorer.tactic_thresholds),
+        hard_signal_enabled=hard_signal,
+        lexicon=lexicon,
+        reassurance_patterns=patterns,
+        feature_version=data.get("feature_version", ""),
+        cue_lexicon_hash=cue_hash,
+        reassurance_hash=reass_hash,
+        embed_backend=data.get("embed_backend", "sentence-transformers"),
+    )
 
 
 def main(argv: list[str] | None = None) -> None:  # pragma: no cover - CLI

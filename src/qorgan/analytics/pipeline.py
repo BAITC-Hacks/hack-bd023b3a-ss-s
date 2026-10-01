@@ -25,6 +25,7 @@ from qorgan.config import get_config
 from qorgan.data.incident_seed import load_incidents_jsonl
 from qorgan.data.schema import Incident, Organization
 from qorgan.eval import metrics
+from qorgan.atomic import write_text_atomic
 
 _RECENT_WINDOW_DAYS = 7.0
 # Novelty tuned to real e5 scale: established scam families sit ~0.03 cosine-distance apart,
@@ -117,7 +118,7 @@ def load_embeddings_npz(path: Path) -> tuple[list[str], np.ndarray]:
 
 def write_organizations_jsonl(organizations: Sequence[Organization], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(o.model_dump_json() for o in organizations) + "\n", encoding="utf-8")
+    write_text_atomic(path, "\n".join(o.model_dump_json() for o in organizations) + "\n")
 
 
 def load_organizations_jsonl(path: Path) -> list[Organization]:

@@ -43,6 +43,17 @@ _EMBED_BACKENDS = ("sentence-transformers", "onnx", "device")
 _DEFAULT_DEVICE_EMBED_URL = "http://127.0.0.1:8765"
 _DEFAULT_DEVICE_EMBED_CACHE_SUBDIR = "cache/device_embeddings.sqlite"
 _DEFAULT_EMBED_ONNX_SUBDIR = Path("site") / "models" / "Xenova" / "multilingual-e5-base"
+# The head weights the browser ships (committed): the server can score with exactly these.
+_DEFAULT_WEB_WEIGHTS_SUBPATH = Path("site") / "models" / "weights.json"
+# Which `linear` heads the server serves (2026-09-29): `bundle` = the trained sklearn bundle in
+# `models/linear` only; `web` = the committed browser weights only (a deployment: server and
+# device score identically by construction); `auto` = the bundle when it is valid for the
+# current lexicons, else the browser weights -- never the keyword `mock` while a real model exists.
+_LINEAR_WEIGHTS_SOURCES = ("auto", "bundle", "web")
+# Level of the server's own `qorgan.*` log lines (purge runs, weight fallbacks, audit failures).
+_LOG_LEVELS = ("debug", "info", "warning", "error")
+_DEFAULT_LOG_LEVEL = "info"
+_DEFAULT_LINEAR_WEIGHTS_SOURCE = "auto"
 # Shipped default (2026-09-14, PLAN_2026-09 A4/A5): heads trained on the int8 ONNX
 # embeddings the browser ships (server + device embed identically). At 0.59 every FPR
 # gate is 0 (test / authored_heldout / ood) with test recall 0.953 and authored recall
@@ -141,6 +152,9 @@ class Config(BaseModel):
 
     # --- Embeddings + linear classifier backend ("linear") ---
     linear_model_dir: Path
+    web_weights_path: Path
+    linear_weights_source: Literal["auto", "bundle", "web"]
+    log_level: str
     embed_model_name: str
     embed_backend: str
     embed_onnx_dir: Path
@@ -294,6 +308,13 @@ def _read_secret_bytes(env: Mapping[str, str], key: str) -> bytes | None:
     return value.encode("utf-8") if value else None
 
 
+def _read_choice(env: Mapping[str, str], key: str, choices: tuple[str, ...], default: str) -> str:
+    raw = (env.get(key) or default).strip().lower()
+    if raw not in choices:
+        raise ConfigError(f"{key}={raw!r} must be one of {list(choices)}")
+    return raw
+
+
 def _read_switch(env: Mapping[str, str], key: str, values: Mapping[str, bool], default: str) -> bool:
     raw = (env.get(key) or default).strip().lower()
     if raw not in values:
@@ -375,6 +396,11 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
             linear_model_dir=_read_path(
                 source, "QORGAN_LINEAR_MODEL_DIR", _read_path(source, "QORGAN_MODEL_DIR", _REPO_ROOT / "models") / "linear"
             ),
+            web_weights_path=_read_path(source, "QORGAN_WEB_WEIGHTS_PATH", _REPO_ROOT / _DEFAULT_WEB_WEIGHTS_SUBPATH),
+            linear_weights_source=_read_choice(
+                source, "QORGAN_LINEAR_WEIGHTS", _LINEAR_WEIGHTS_SOURCES, _DEFAULT_LINEAR_WEIGHTS_SOURCE
+            ),
+            log_level=_read_choice(source, "QORGAN_LOG_LEVEL", _LOG_LEVELS, _DEFAULT_LOG_LEVEL).upper(),
             embed_model_name=_read_str(source, "QORGAN_EMBED_MODEL_NAME", _DEFAULT_EMBED_MODEL_NAME),
             embed_backend=_read_str(source, "QORGAN_EMBED_BACKEND", _DEFAULT_EMBED_BACKEND),
             embed_onnx_dir=_read_path(source, "QORGAN_EMBED_ONNX_DIR", _REPO_ROOT / _DEFAULT_EMBED_ONNX_SUBDIR),

@@ -1,6 +1,9 @@
-/* Qorğan — forensic-editorial landing. Two voices: Fraunces (human) · Plex Mono (machine). */
+/* Qorğan — forensic-editorial landing. Two voices: Fraunces (human) · Plex Mono (machine).
+   One deliberate theme (paper with night panels) on every page: `color-scheme: only light`
+   keeps browser widgets light and opts out of forced darkening where the browser supports it. */
 
 :root{
+  color-scheme:only light;
   --paper:#F2EFE8;
   --ink:#181410;
   --ink-soft:#6A6254;
@@ -13,7 +16,9 @@
   --moss:#3E6B4E;
   --col:42.5rem;              /* 680px reading column */
   --rail-gap:3.25rem;         /* rails sit this far outside the column */
-  --serif:"Fraunces",Georgia,serif;
+  /* Fraunces has no Cyrillic; PT Serif (ParaType, covers the Kazakh letters) carries Russian and
+     Kazakh text, so Cyrillic never falls back glyph by glyph into a system serif. */
+  --serif:"Fraunces","PT Serif",Georgia,serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 }
 
@@ -55,7 +60,9 @@ main{position:relative;z-index:1}
   position:sticky;top:0;z-index:50;
   display:flex;align-items:center;gap:2.25rem;
   padding:1.1rem clamp(1.25rem,4vw,3rem);
-  background:color-mix(in srgb,var(--paper) 88%,transparent);
+  /* 96 %, not less: over the dark stage panels a thinner veil turned the grey nav links
+     below 4.5:1 (axe: 4.07 at 88 %). */
+  background:color-mix(in srgb,var(--paper) 96%,transparent);
   backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   border-bottom:1px solid color-mix(in srgb,var(--hairline) 70%,transparent);
 }
@@ -63,9 +70,29 @@ main{position:relative;z-index:1}
 .brand-glyph{width:1.45rem;height:auto;fill:var(--ink)}
 .brand-word{font-family:var(--serif);font-weight:600;font-size:1.35rem;letter-spacing:-.01em}
 .nav-links{display:flex;gap:1.9rem;font-size:.8rem;letter-spacing:.04em}
-.nav-links a{text-decoration:none;color:var(--ink-soft);transition:color .15s ease}
+.nav-links a{text-decoration:none;color:var(--ink-soft);transition:color .15s ease;white-space:nowrap}
 .nav-links a:hover{color:var(--ink)}
 .nav-links a[aria-current="page"]{color:var(--ink)}
+
+/* header language switch — one control for the whole page (landing + citizen page) */
+.lang-switch{
+  display:flex;gap:.15rem;padding:.2rem;border:1px solid var(--hairline);border-radius:999px;
+  background:color-mix(in srgb,var(--paper) 60%,#fff);flex:0 0 auto;
+}
+.lang-opt{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;
+  min-width:2.9rem;min-height:2.3rem;padding:0 .7rem;border-radius:999px;cursor:pointer;
+  font-size:.76rem;letter-spacing:.06em;color:var(--ink-soft);transition:color .15s ease,background .15s ease;
+}
+.lang-opt input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.lang-opt:hover{color:var(--ink)}
+.lang-opt:has(input:checked){background:var(--ink);color:var(--paper)}
+.lang-opt:has(input:focus-visible){outline:2px solid var(--oxide);outline-offset:2px}
+
+.sr-only{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0,0,0,0);white-space:nowrap;border:0;
+}
 
 /* shared "no data yet" notice — analyst dashboard + live-call page degrade states */
 .data-empty{
@@ -82,7 +109,7 @@ main{position:relative;z-index:1}
 .btn{
   display:inline-flex;align-items:center;justify-content:center;
   font-family:var(--mono);font-size:.84rem;font-weight:500;letter-spacing:.02em;
-  padding:.9rem 1.7rem;border-radius:999px;text-decoration:none;
+  padding:.9rem 1.7rem;border-radius:999px;text-decoration:none;text-align:center;
   border:1px solid transparent;transition:transform .15s ease,background .15s ease,color .15s ease;
 }
 .btn:hover{transform:translateY(-1px)}
@@ -94,11 +121,15 @@ main{position:relative;z-index:1}
 .btn-fill:hover{background:#2A241B}
 .btn-line{border-color:var(--ink);color:var(--ink)}
 .btn-line:hover{background:var(--ink);color:var(--paper)}
-.btn-nav{padding:.62rem 1.25rem;font-size:.78rem}
+.btn-nav{padding:.62rem 1.25rem;font-size:.78rem;white-space:nowrap}
 .btn-paper{background:var(--paper);color:var(--ink)}
 .btn-paper:hover{background:#fff}
 .btn-ghost{border-color:color-mix(in srgb,var(--paper) 40%,transparent);color:var(--paper)}
 .btn-ghost:hover{border-color:var(--paper)}
+/* `.btn-ghost` sets no background, so on a <button> the UA's light `buttonface` showed through
+   and hid the white label ("Review report", "End call"). */
+button.btn-ghost{background:transparent}
+button.btn-ghost:hover{background:color-mix(in srgb,var(--paper) 8%,transparent)}
 :focus-visible{outline:2px solid var(--oxide);outline-offset:3px;border-radius:4px}
 .btn:focus-visible{outline-offset:4px;border-radius:999px}
 
@@ -157,9 +188,9 @@ main{position:relative;z-index:1}
   color:color-mix(in srgb,var(--paper) 78%,transparent);
   border-bottom:1px solid var(--night-edge);
 }
-.p-dot{width:.55rem;height:.55rem;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.p-dot{width:.55rem;height:.55rem;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber);flex:0 0 auto}
 .p-dot.tone-moss{background:#67B98C;box-shadow:0 0 8px #67B98C}
-.p-right{margin-left:auto;color:color-mix(in srgb,var(--paper) 40%,transparent)}
+.p-right{margin-left:auto;color:color-mix(in srgb,var(--paper) 60%,transparent)} /* ≥ 4.5:1 (axe: 3.46 at 40 %) */
 .p-body{position:relative;padding:1.1rem 1.25rem .9rem;transition:opacity .3s ease}
 .p-body.fading{opacity:.15}
 .cv-wave{width:100%;height:110px}
@@ -173,7 +204,7 @@ main{position:relative;z-index:1}
 .p-axis{
   display:flex;justify-content:space-between;
   padding:.55rem 1.25rem .9rem;font-size:.7rem;
-  color:color-mix(in srgb,var(--paper) 35%,transparent);
+  color:color-mix(in srgb,var(--paper) 58%,transparent); /* ≥ 4.5:1 (axe: 2.9 at 35 %) */
 }
 .a-caption{
   text-align:center;font-size:.72rem;letter-spacing:.08em;
@@ -222,27 +253,30 @@ main{position:relative;z-index:1}
 }
 .step p{font-size:.98rem;line-height:1.66;color:color-mix(in srgb,var(--ink) 78%,var(--paper))}
 
-/* evidence split */
+/* evidence split — grid children may shrink below their min-content (the mono card's
+   unbreakable header pushed the whole page to 448 px on a 390 px phone) */
 .split{display:grid;grid-template-columns:1fr 1.1fr;gap:4.5rem;align-items:center}
+.split>*{min-width:0}
 .evidence-card{
   border:1px solid var(--hairline);border-radius:10px;background:#FAF8F2;
   padding:1.6rem 1.75rem 1.4rem;font-size:.8rem;
   box-shadow:0 20px 50px -30px rgba(24,20,16,.25);
 }
 .ec-head{
-  display:flex;justify-content:space-between;gap:1rem;
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:.4rem 1rem;
   padding-bottom:1rem;margin-bottom:1.1rem;border-bottom:1px solid var(--hairline);
   color:var(--ink-soft);
 }
 .ec-tag{color:var(--oxide);font-weight:500}
 .ec-row{display:grid;grid-template-columns:11.5em 1fr 2.6em;gap:1em;align-items:center;padding:.42rem 0}
-.ec-name{color:var(--ink)}
+.ec-name{color:var(--ink);overflow-wrap:anywhere}
 .ec-bar{height:6px;border-radius:3px;background:color-mix(in srgb,var(--hairline) 55%,transparent);overflow:hidden}
 .ec-bar i{display:block;height:100%;width:var(--w);border-radius:3px;background:linear-gradient(90deg,var(--amber),var(--magenta))}
 .ec-val{text-align:right;color:var(--ink-soft)}
 .ec-foot{margin-top:1.1rem;padding-top:1rem;border-top:1px solid var(--hairline);color:var(--ink-soft)}
 
-/* eval table */
+/* eval table (also the analyst queue); a scroll box keeps wide tables inside the viewport */
+.table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .eval-table{
   width:100%;max-width:34em;border-collapse:collapse;
   font-size:.85rem;margin-top:2.6rem;
@@ -251,9 +285,12 @@ main{position:relative;z-index:1}
   text-align:left;font-weight:500;letter-spacing:.1em;font-size:.72rem;
   color:var(--ink-soft);padding:.6rem .4rem;border-bottom:1px solid var(--ink);
 }
-.eval-table td{padding:.85rem .4rem;border-bottom:1px solid var(--hairline)}
+.eval-table td,.eval-table tbody th{padding:.85rem .4rem;border-bottom:1px solid var(--hairline)}
+.eval-table tbody th{font-weight:400;letter-spacing:normal;font-size:inherit;color:inherit}
 .eval-table .hot{color:var(--oxide);font-weight:500}
+.eval-table .eval-honest th,.eval-table .eval-honest td{border-bottom-color:var(--ink)}
 .table-note{font-size:.72rem;letter-spacing:.05em;color:var(--ink-soft);margin-top:1.1rem}
+.table-note code{font-family:var(--mono)}
 
 /* bilingual moment */
 .bilingual{text-align:center}
@@ -283,22 +320,24 @@ main{position:relative;z-index:1}
   pointer-events:none;
 }
 .try-panel>*{position:relative}
-/* try widget — the live wire to POST /api/analyze */
+/* focus rings that read on the dark card */
+.try-panel :focus-visible{outline-color:var(--amber)}
+/* try widget — one transcript, analysed on this device (the server only on explicit opt-in) */
 .try-widget{
   margin:2.4rem 0;border:1px solid var(--night-edge);border-radius:12px;
   background:color-mix(in srgb,var(--night) 55%,#000);overflow:hidden;
 }
 .tw-head{
-  display:flex;align-items:center;gap:.7rem;padding:.8rem 1.1rem;
+  display:flex;align-items:center;flex-wrap:wrap;gap:.4rem .7rem;padding:.8rem 1.1rem;
   font-size:.74rem;letter-spacing:.05em;border-bottom:1px solid var(--night-edge);
   color:color-mix(in srgb,var(--paper) 70%,transparent);
 }
-.tw-right{margin-left:auto;color:color-mix(in srgb,var(--paper) 38%,transparent)}
+.tw-right{margin-left:auto;color:color-mix(in srgb,var(--paper) 58%,transparent)}
 .tw-input{
   display:block;width:100%;padding:1rem 1.1rem;border:0;resize:vertical;min-height:6.5rem;
   background:transparent;color:var(--paper);font-size:.85rem;line-height:1.7;
 }
-.tw-input::placeholder{color:color-mix(in srgb,var(--paper) 34%,transparent)}
+.tw-input::placeholder{color:color-mix(in srgb,var(--paper) 50%,transparent)}
 .tw-input:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--amber);border-radius:0}
 .tw-controls{
   display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;
@@ -316,6 +355,7 @@ main{position:relative;z-index:1}
 .tw-radio{display:inline-flex;align-items:center;gap:.35rem}
 .tw-radio input{accent-color:var(--amber);margin:0}
 .tw-radio:has(input:checked){color:var(--amber);border-color:var(--amber)}
+.tw-radio:has(input:focus-visible){outline:2px solid var(--amber);outline-offset:2px}
 .tw-result{
   padding:1.1rem 1.1rem 1.2rem;border-top:1px solid var(--night-edge);
   font-size:.78rem;line-height:1.8;
@@ -339,8 +379,9 @@ main{position:relative;z-index:1}
   color:var(--paper);padding:.05em .15em;border-radius:3px;
 }
 .tw-reason{color:color-mix(in srgb,var(--paper) 80%,transparent);margin-top:.4rem}
-.tw-dim{color:color-mix(in srgb,var(--paper) 42%,transparent);margin-top:.5rem}
-.try-note{font-size:.72rem;letter-spacing:.08em;color:color-mix(in srgb,var(--paper) 45%,transparent);margin-top:1.8rem}
+/* 55 %: the caveat, the human note and the model line are content, not decoration (was 42 %, 3.7:1) */
+.tw-dim{color:color-mix(in srgb,var(--paper) 55%,transparent);margin-top:.5rem}
+.try-note{font-size:.72rem;letter-spacing:.08em;color:color-mix(in srgb,var(--paper) 55%,transparent);margin-top:1.8rem}
 
 /* footer */
 .footer{margin-top:clamp(5rem,12vh,9rem);border-top:1px solid var(--hairline);position:relative;z-index:1;background:var(--paper)}
@@ -348,13 +389,18 @@ main{position:relative;z-index:1}
   display:flex;justify-content:space-between;flex-wrap:wrap;gap:1rem;
   padding:2rem 0 2.6rem;font-size:.74rem;letter-spacing:.04em;color:var(--ink-soft);
 }
-.foot-links{display:flex;gap:1.8rem}
-.foot-links a{text-decoration:none;color:var(--ink-soft);transition:color .15s ease}
+.foot-links{display:flex;flex-wrap:wrap;gap:.6rem 1.6rem}
+.foot-links a{text-decoration:none;color:var(--ink-soft);transition:color .15s ease;white-space:nowrap}
 .foot-links a:hover{color:var(--ink)}
 
 section{scroll-margin-top:5.5rem}
 
 /* ── responsive ── */
+/* The landing header also carries the language switch and its call to action, so its links
+   give way earlier than the other pages' (Russian labels need ~1170 px for everything). */
+@media (max-width:75rem){
+  .lp-nav .nav-links{display:none}
+}
 @media (max-width:61rem){
   .rails{display:none}
   .nav-links{display:none}
@@ -362,7 +408,11 @@ section{scroll-margin-top:5.5rem}
   .split{grid-template-columns:1fr;gap:2.8rem}
 }
 @media (max-width:38rem){
-  .ec-row{grid-template-columns:9em 1fr 2.6em;font-size:.72rem}
+  .nav{gap:1rem}
+  /* with a language switch in the header there is no room for the button; the hero repeats it */
+  .nav:has(.lang-switch) .btn-nav{display:none}
+  .ec-row{grid-template-columns:1fr 2.6em;row-gap:.3rem;font-size:.72rem}
+  .ec-name{grid-column:1/-1}
   .cta-row .btn{width:100%}
 }
 
