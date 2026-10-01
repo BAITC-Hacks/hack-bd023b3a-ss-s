@@ -22,6 +22,7 @@ already exists, so re-running (container restart, local dev) is a fast no-op.
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -249,17 +250,34 @@ def ensure_asr_models() -> None:
             _log(f"asr model: {name} unavailable ({exc}); microphone mode will report it")
 
 
-def main() -> None:
+# `serve`: everything the server needs before it listens. `seeds`: the Level-2 demo seeding --
+# minutes on a shared vCPU, so the container entrypoint runs it in the background after `serve`
+# and the health check is answered at once (ADR D60). `all` (default): both, in order.
+PHASES = ("all", "serve", "seeds")
+
+
+def _parse_phase(argv: list[str]) -> str:
+    parser = argparse.ArgumentParser(description="Provision the deployed demo (idempotent).")
+    parser.add_argument("--phase", choices=PHASES, default="all")
+    return parser.parse_args(argv).phase
+
+
+def main(argv: list[str] | None = None) -> None:
+    phase = _parse_phase(argv or [])
     os.environ.setdefault("QORGAN_CLASSIFIER_BACKEND", "linear")
+    if phase == "seeds":
+        ensure_l2_seeds()
+        return
     ensure_corpus()
     ensure_dialogue_pool()
     ensure_embedder()  # first: everything below embeds through it
     source = ensure_model()
-    ensure_l2_seeds()
+    if phase == "all":
+        ensure_l2_seeds()
     ensure_web_weights(source)
     ensure_asr_models()
     _log("done — serve with: uvicorn qorgan.api:app --host 0.0.0.0 --port $PORT")
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

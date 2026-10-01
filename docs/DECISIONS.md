@@ -1473,3 +1473,27 @@ personal keys needed, but no audit key → 503. `tests_js/pages.test.mjs` pins t
 in Chromium: a fresh visit opens the console without sign-in (500 incidents, 5 organizations),
 the `/api/admin` requests are session, overview and stats, all 200, and the audit log reads
 `public-demo session.start ok:investigator`.
+
+### D60 — The server listens first; Level 2 is seeded in the background (2026-10-01)
+The deploy of `36c53fd` (PR #10) built, then failed Railway's health check. Eleven attempts on
+`/api/health` over the 5-minute window all got "service unavailable", and the previous deploy
+kept serving. Since `QORGAN_NUMBER_HMAC_KEY` was set, every start seeded Level 2 (500
+transcripts embedded and clustered) **before** uvicorn bound the port. That took 25 s on a
+laptop, but reproduced at `--cpus=0.5` it took **507 s**: longer than the window, so the
+container could never be healthy in time. The same gap caused the earlier 502 "Application
+failed to respond".
+**Change.** `deploy_bootstrap.py --phase serve|seeds|all` (default `all`, so the build and local
+use are unchanged). The entrypoint runs `serve`, which is everything except the seeding:
+corpus, pool, embedder, model probe, weights and speech models. It then starts `seeds` in the
+background and execs uvicorn. Incidents and organizations are written atomically, and the
+console already answers `available: false` until they exist. Its empty-state hint now says a
+fresh server is preparing the data, instead of telling a jury to run scripts.
+**Evidence.** `tests/test_deploy_bootstrap.py`: `serve` provisions everything but the seeds,
+`seeds` only seeds, the default runs every step, and the entrypoint backgrounds the seeding
+before `exec uvicorn`. `pytest` 1324 passed, `npm test` 71/71. Container at `--cpus=0.5` with
+`QORGAN_ADMIN_OPEN_ACCESS=investigator`: healthy after **20 s**, the overview answered
+`available: false` at once, seeds ready at **507 s** (500 incidents, 5 organizations), health
+200 throughout.
+**Cost.** For the first minutes after a deploy, the console shows "no Level-2 analysis yet".
+The seeding process is not reaped by uvicorn (PID 1), which leaves one zombie entry after it
+exits; harmless. Compose runs with `init: true`, which reaps it.

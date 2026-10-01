@@ -128,3 +128,47 @@ def test_level2_seeding_follows_the_configured_data_dir_and_key(monkeypatch, tmp
     (tmp_path / "processed" / "organizations.jsonl").write_text("", encoding="utf-8")
     bootstrap.ensure_l2_seeds()
     assert ran == [], "already seeded in the configured data dir"
+
+
+_STEPS = ("ensure_corpus", "ensure_dialogue_pool", "ensure_embedder", "ensure_model",
+          "ensure_l2_seeds", "ensure_web_weights", "ensure_asr_models")
+
+
+def _record_steps(monkeypatch, bootstrap) -> list[str]:
+    calls: list[str] = []
+    for step in _STEPS:
+        monkeypatch.setattr(bootstrap, step, lambda *args, step=step, **kwargs: calls.append(step))
+    return calls
+
+
+# The container must answer its health check within the platform's window (Railway: 5 min),
+# but seeding Level 2 embeds ~500 transcripts -- minutes on a shared vCPU. The entrypoint runs
+# the `serve` phase, starts `seeds` in the background and serves at once (ADR D60).
+def test_serve_phase_provisions_everything_but_the_level2_seeds(monkeypatch):
+    bootstrap = _load_bootstrap()
+    calls = _record_steps(monkeypatch, bootstrap)
+    bootstrap.main(["--phase", "serve"])
+    assert "ensure_l2_seeds" not in calls
+    assert set(calls) == set(_STEPS) - {"ensure_l2_seeds"}
+
+
+def test_seeds_phase_only_seeds(monkeypatch):
+    bootstrap = _load_bootstrap()
+    calls = _record_steps(monkeypatch, bootstrap)
+    bootstrap.main(["--phase", "seeds"])
+    assert calls == ["ensure_l2_seeds"]
+
+
+def test_default_phase_runs_every_step(monkeypatch):
+    bootstrap = _load_bootstrap()
+    calls = _record_steps(monkeypatch, bootstrap)
+    bootstrap.main([])
+    assert set(calls) == set(_STEPS)
+
+
+def test_entrypoint_serves_before_the_seeds_finish() -> None:
+    script = (_SCRIPT.parent / "deploy_entrypoint.sh").read_text(encoding="utf-8")
+    serve = script.index("deploy_bootstrap.py --phase serve")
+    seeds = script.index("deploy_bootstrap.py --phase seeds")
+    assert serve < seeds < script.index("exec uvicorn")
+    assert script[seeds:script.index("\n", seeds)].rstrip().endswith("&"), "seeding runs in the background"
