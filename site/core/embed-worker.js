@@ -8,7 +8,10 @@
 // feature-extraction (verified in Chromium). `transformers.min.js` is the self-contained bundle;
 // `transformers.web.js`
 // is the bundler entry with bare `onnxruntime-web` imports and cannot be imported directly.
-import { env, pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
+// Self-hosted, never from a CDN (ADR D61): this page is cross-origin isolated, and WebKit (Safari,
+// every iPhone browser) refuses a worker's cross-origin import under COEP -- the microphone then
+// failed with "embedding worker failed to load". `deploy_bootstrap` installs the pinned bytes.
+import { env, pipeline } from "../vendor/transformers/3.8.1/transformers.min.js";
 
 // Model id / dtype / prefix arrive with the first request (from qorgan-config.json, which is
 // generated from the server's own embedder settings -- ADR D17: one graph on both sides).
@@ -17,6 +20,9 @@ let settings = { model_id: "Xenova/multilingual-e5-base", dtype: "q8", prefix: "
 env.allowRemoteModels = false;   // never fall back to huggingface.co from the client
 env.allowLocalModels = true;
 env.localModelPath = new URL("../models/", import.meta.url).href;
+// onnxruntime-web's WASM (and its .mjs loader) from the same self-hosted release -- by default
+// transformers.js fetches them from jsDelivr, which COEP blocks in WebKit as well.
+env.backends.onnx.wasm.wasmPaths = new URL("../vendor/transformers/3.8.1/", import.meta.url).href;
 
 let extractorPromise = null;
 

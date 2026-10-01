@@ -72,9 +72,11 @@ class BodySizeLimitMiddleware:
 # subresource on it must be CORS-loaded (`crossorigin` on script/link tags) — plus the
 # scripts it starts workers from: a dedicated worker inherits the document's embedder
 # policy and fails to load (an ErrorEvent with no message) unless its own script response
-# carries the same COEP header.
+# carries the same COEP header. That includes the self-hosted runtimes under /vendor/:
+# embed-worker.js imports transformers.js from there and onnxruntime-web starts its own workers
+# from the .mjs there (ADR D61: WebKit refused the import, Chromium blocked the .mjs).
 CROSS_ORIGIN_ISOLATED_PATHS = frozenset({"/live.html"})
-CROSS_ORIGIN_ISOLATED_PREFIXES = ("/core/",)
+CROSS_ORIGIN_ISOLATED_PREFIXES = ("/core/", "/vendor/")
 _ISOLATION_HEADERS = (
     (b"cross-origin-opener-policy", b"same-origin"),
     (b"cross-origin-embedder-policy", b"require-corp"),

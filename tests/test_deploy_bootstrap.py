@@ -24,8 +24,8 @@ def _load_bootstrap():
 def test_embedder_is_provisioned_before_anything_embeds(monkeypatch):
     bootstrap = _load_bootstrap()
     calls: list[str] = []
-    for step in ("ensure_corpus", "ensure_dialogue_pool", "ensure_embedder", "ensure_model",
-                 "ensure_l2_seeds", "ensure_web_weights", "ensure_asr_models"):
+    for step in ("ensure_corpus", "ensure_dialogue_pool", "ensure_embedder", "ensure_embed_runtime",
+                 "ensure_model", "ensure_l2_seeds", "ensure_web_weights", "ensure_asr_models"):
         monkeypatch.setattr(bootstrap, step, lambda *args, step=step, **kwargs: calls.append(step))
 
     bootstrap.main()
@@ -130,7 +130,7 @@ def test_level2_seeding_follows_the_configured_data_dir_and_key(monkeypatch, tmp
     assert ran == [], "already seeded in the configured data dir"
 
 
-_STEPS = ("ensure_corpus", "ensure_dialogue_pool", "ensure_embedder", "ensure_model",
+_STEPS = ("ensure_corpus", "ensure_dialogue_pool", "ensure_embedder", "ensure_embed_runtime", "ensure_model",
           "ensure_l2_seeds", "ensure_web_weights", "ensure_asr_models")
 
 

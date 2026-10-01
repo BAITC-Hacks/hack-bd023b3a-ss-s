@@ -7,8 +7,10 @@
    - /api/ and anything cross-origin: never cached, never intercepted -- the only network
      traffic with call content is the explicit report submit, and it must stay live. */
 
-const SHELL_CACHE = "qorgan-shell-v7"; // v7: reload pages a cache-first worker rendered; v6: network-first shell (no mixed versions after a deploy); v5: landing in kk/ru/en (landing.js, i18n-dom.js); v4: live page in kk/ru/en; v3: report review (D44); v2: COOP/COEP (B9)
-const MODEL_CACHE = "qorgan-models-v1";
+const SHELL_CACHE = "qorgan-shell-v8"; // v8: large binaries bypass the worker (D61); v7: reload pages a cache-first worker rendered; v6: network-first shell (no mixed versions after a deploy); v5: landing in kk/ru/en (landing.js, i18n-dom.js); v4: live page in kk/ru/en; v3: report review (D44); v2: COOP/COEP (B9)
+// v2: the ONNX model is no longer kept here (transformers.js caches it itself); bumping the name
+// deletes the v1 copy (~278 MB) on activation.
+const MODEL_CACHE = "qorgan-models-v2";
 const SHELL = [
   "/", "/index.html", "/live.html", "/styles.css", "/live.css", "/main.js", "/live.js", "/try.js",
   "/landing.js", "/i18n.js", "/i18n-dom.js", "/manifest.webmanifest",
@@ -29,6 +31,8 @@ self.addEventListener("install", (event) => {
       .then(() => self.skipWaiting())
   );
 });
+
+const LARGE_BINARY = /\.(onnx|wasm)$/;
 
 // Shells v1-v5 were served cache-first (stale-while-revalidate): a page open while this worker
 // activates was rendered from that cache -- after a deploy, the analyst console's pre-sign-in
@@ -61,6 +65,11 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin || event.request.method !== "GET") return;
   if (url.pathname.startsWith("/api/")) return; // live, never cached
   if (url.pathname.startsWith("/models/vosk/")) return; // the speech recogniser keeps its own model cache
+  // Large binaries go straight to the network (ADR D61). Firefox stops a service worker ~30 s into
+  // an event and cuts off whatever it is still streaming: the 278 MB model failed with "Error in
+  // input stream", and the 21 MB WASM runtimes can on a slow connection. transformers.js keeps
+  // the model in its own Cache API store; the browser's HTTP cache holds the rest.
+  if (LARGE_BINARY.test(url.pathname)) return;
   if (url.pathname.startsWith("/models/")) {
     event.respondWith(cacheFirst(MODEL_CACHE, event.request));
     return;

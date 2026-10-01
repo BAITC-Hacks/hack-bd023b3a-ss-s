@@ -1497,3 +1497,50 @@ before `exec uvicorn`. `pytest` 1324 passed, `npm test` 71/71. Container at `--c
 **Cost.** For the first minutes after a deploy, the console shows "no Level-2 analysis yet".
 The seeding process is not reaped by uvicorn (PID 1), which leaves one zombie entry after it
 exits; harmless. Compose runs with `init: true`, which reaps it.
+
+### D61 — The browser embedder's runtime is self-hosted; large binaries bypass the service worker (2026-10-01)
+Reported: "Could not turn on the microphone (embedding worker failed to load (check the model
+files and the script imports))". Prod served every file correctly, and Chromium on prod embedded
+fine (4.2 s warm-up, 768-d). The failure depends on the browser engine. Two independent defects:
+1. **WebKit (Safari, every iPhone browser).** `embed-worker.js` imported transformers.js from
+   jsDelivr. `live.html` is cross-origin isolated (COOP/COEP `require-corp`, for threaded WASM),
+   and WebKit refuses a worker's cross-origin import under that policy: *"Refused to load
+   'https://cdn.jsdelivr.net/…/transformers.min.js' worker because of
+   Cross-Origin-Embedder-Policy"*. The worker never started, so the message is exactly the
+   reported one. Reproduced on prod with Playwright WebKit. Serving the file same-origin was
+   not enough: `/vendor/` responses carried no COEP. WebKit then refused the same-origin
+   import, and Chromium blocked the ORT `.mjs` that starts the WASM threads
+   (`net::ERR_BLOCKED_BY_RESPONSE`).
+2. **Firefox.** The service worker routed `/models/` through itself (cache-first with a cache
+   `put`). Firefox stops a service worker about 30 s into an event and cuts off what it is
+   still streaming. The 278 MB model failed with *"Error in input stream"* after about 32 s,
+   reproducibly on prod. With service workers blocked it loaded (65 s). Reproduced locally
+   behind a 5 MB/s proxy: the v7 worker failed at 30.0 s.
+
+**Change.**
+- `qorgan.web.embed_runtime` installs `transformers.min.js`,
+  `ort-wasm-simd-threaded.jsep.mjs` and `.jsep.wasm` under `site/vendor/transformers/3.8.1/`,
+  each checked against its sha256. The bytes are identical to the CDN and to
+  `node_modules` 3.8.1, so parity (ADR D32) is untouched.
+- `deploy_bootstrap` makes this a **required** step: a build without the runtime fails instead
+  of shipping a page that cannot score.
+- The worker imports from there and sets `env.backends.onnx.wasm.wasmPaths` to the same
+  directory. Nothing in the worker is cross-origin any more.
+- `/vendor/` joins `/core/` in `CROSS_ORIGIN_ISOLATED_PREFIXES`.
+- `sw.js` v8: `.onnx` and `.wasm` bypass the service worker. transformers.js keeps the model in
+  its own Cache API store. `qorgan-models-v2` drops the v1 copy (about 278 MB) on activation.
+
+**Evidence.**
+- Tests: `tests/web/test_embed_runtime.py` (pinned install, refusal of a tampered file, hashes
+  equal to `node_modules`, nothing cross-origin in the worker); `test_api_limits.py` (COEP on
+  `/vendor/`); `sw.test.mjs` (the large binaries are not intercepted, the shell still is).
+  `pytest` 1328, `npm test` 72/72.
+- Browsers, locally behind a 5 MB/s proxy with the v8 worker in control: Firefox, WebKit and
+  Chromium each warmed up and embedded (61–64 s, essentially the download time).
+- The microphone button with a fake audio device: Chromium and Firefox reach "Слушаем". WebKit
+  gets past the worker and the recogniser to the permission prompt, which headless WebKit
+  cannot answer.
+
+**Cost.** The page no longer works offline for the WASM runtimes. They now depend on the HTTP
+cache, which revalidates (`no-cache`), and offline mic mode was never verified anyway. The
+image gains about 22 MB.

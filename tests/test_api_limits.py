@@ -92,3 +92,15 @@ def test_site_shell_is_revalidated_on_every_load(path):
     assert res.headers["cache-control"] == "no-cache"
     assert "etag" in res.headers  # so revalidation is a cheap 304
 
+
+
+def test_the_self_hosted_worker_runtime_is_cross_origin_isolated(client):
+    # ADR D61: embed-worker.js imports transformers.js from /vendor/, and onnxruntime-web starts
+    # its own workers from the .mjs there. Without COEP on those responses WebKit refuses the
+    # import ("worker because of Cross-Origin-Embedder-Policy") and Chromium blocks the .mjs
+    # (net::ERR_BLOCKED_BY_RESPONSE). Asserted on the headers alone: site/vendor is provisioned
+    # by deploy_bootstrap and absent from a bare checkout.
+    for path in ("/vendor/transformers/3.8.1/transformers.min.js", "/vendor/transformers/3.8.1/ort-wasm-simd-threaded.jsep.mjs"):
+        res = client.get(path)
+        assert res.headers["cross-origin-embedder-policy"] == "require-corp", path
+        assert res.headers["cross-origin-opener-policy"] == "same-origin", path
