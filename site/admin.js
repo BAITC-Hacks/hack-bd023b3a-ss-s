@@ -37,8 +37,11 @@
   const signinNote = document.getElementById("admSigninNote");
   if (!kpisEl || !queueWrap || !ddEl || !modal || !consoleEl || !signinForm) return;
 
+  // A deployed server seeds the demo in the background after it starts (ADR D60); a local
+  // checkout seeds by hand.
   const SEED_HINT =
-    "Run <code>python scripts/demo_seed.py</code> then " +
+    "A freshly started server prepares the demo data in the background — refresh in a few " +
+    "minutes. Running locally: <code>python scripts/demo_seed.py</code> then " +
     "<code>python -m qorgan.analytics.pipeline</code>.";
 
   const KPI_LABELS = [

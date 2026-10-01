@@ -76,6 +76,13 @@ kept as history._
   calls with call content: `POST /api/reports`, `DELETE /api/reports/{receipt}`. Model load
   ~3 s from localhost, ~0.6 s first inference (WASM/WebGPU).
 
+## 2026-10-01 — health check vs. seeding (ADR D60)
+
+- PR #10's deploy failed Railway's 5-minute health check: the server seeded Level 2 before
+  listening, and on a slow vCPU that takes ~8.5 min (reproduced at `--cpus=0.5`). It now
+  listens first (healthy in 20 s) and seeds in the background. The console shows "preparing"
+  for the first minutes after a deploy.
+
 ## 2026-10-01 — open demo access for the jury (ADR D59)
 
 - `QORGAN_ADMIN_OPEN_ACCESS=investigator` on the hosted demo lets a visitor without a key

@@ -39,6 +39,10 @@ fi
 # scrubbed splits and nothing is fetched from the network. Runtime state is never in this copy.
 cp /opt/qorgan/corpus/* "$state_dir"/
 
-python /app/scripts/deploy_bootstrap.py
+python /app/scripts/deploy_bootstrap.py --phase serve
+# Seeding Level 2 embeds ~500 transcripts: minutes on a shared vCPU, longer than a platform's
+# health-check window (Railway: 5 min). It runs in the background while the server answers; the
+# console shows "no Level-2 analysis yet" until the files land (they are written atomically).
+python /app/scripts/deploy_bootstrap.py --phase seeds &
 
 exec uvicorn qorgan.api:app --host 0.0.0.0 --port "${PORT:-8000}" --workers 1 --no-server-header "$@"
