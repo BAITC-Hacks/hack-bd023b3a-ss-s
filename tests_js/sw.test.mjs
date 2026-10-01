@@ -32,3 +32,50 @@ test("every module a precached page script imports is precached", () => {
   }
   assert.deepEqual(missing, [], `add to SHELL in site/sw.js: ${missing.join(", ")}`);
 });
+
+// Run sw.js's activate handler in a minimal fake ServiceWorkerGlobalScope.
+async function activateWith(cacheNames) {
+  const handlers = {};
+  const deleted = [];
+  const navigated = [];
+  // As in a browser: a navigation's fetch is handled only once activation has finished, so
+  // navigate() settles only after it. A worker that awaits navigate() inside waitUntil never
+  // activates (the deadlock that left the page "Loading").
+  let activated;
+  const activation = new Promise((resolve) => { activated = resolve; });
+  const navigate = (url) => activation.then(() => { navigated.push(url); });
+  const windows = [{ url: "https://host/admin.html", navigate }, { url: "https://host/live.html", navigate }];
+  const self = {
+    location: { origin: "https://host" },
+    addEventListener: (type, fn) => { handlers[type] = fn; },
+    skipWaiting: async () => {},
+    clients: { claim: async () => {}, matchAll: async () => windows },
+  };
+  const caches = {
+    keys: async () => cacheNames,
+    delete: async (name) => { deleted.push(name); return true; },
+  };
+  const source = readFileSync(join(REPO, "site", "sw.js"), "utf8");
+  new Function("self", "caches", "fetch", "URL", source)(self, caches, async () => {}, URL);
+  let done;
+  handlers.activate({ waitUntil: (promise) => { done = promise; } });
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("activation never finished (deadlock)")), 500));
+  await Promise.race([done, timeout]);
+  activated();
+  await new Promise((resolve) => setTimeout(resolve, 0)); // navigations scheduled after activation
+  return { deleted, navigated };
+}
+
+// A v1-v5 worker served the shell cache-first: the page open while the new worker activates
+// was rendered from that cache (a pre-sign-in admin.js answered "Dashboard offline -- API
+// returned 401"). Replacing such a worker reloads the open pages once, from the network.
+test("replacing a cache-first (v1-v5) shell reloads the open pages", async () => {
+  const { deleted, navigated } = await activateWith(["qorgan-shell-v4", "qorgan-models-v1"]);
+  assert.deepEqual(deleted, ["qorgan-shell-v4"]);
+  assert.deepEqual(navigated, ["https://host/admin.html", "https://host/live.html"]);
+});
+
+test("a first install or a network-first predecessor reloads nothing", async () => {
+  assert.deepEqual((await activateWith([])).navigated, []);
+  assert.deepEqual((await activateWith(["qorgan-shell-v6", "qorgan-models-v1"])).navigated, []);
+});

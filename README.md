@@ -78,6 +78,13 @@ Qorğan закрывает именно этот разрыв: он работа
 - **Уровень 2, для аналитика** — очередь организаций по номерному графу, флаг новой схемы,
   детализация; доступ к полной расшифровке требует роли следователя, кода цели и
   попадает в **HMAC-цепочку аудита**.
+- **Контроль доступа к кабинету аналитика есть, но на демо-сервере он выключен**, чтобы
+  жюри могло открыть `admin.html` без ключа. В рабочем режиме каждый аналитик входит по
+  персональному ключу (`QORGAN_ANALYST_KEYS`, роли analyst / investigator), без ключей
+  кабинет закрыт. На демо включён `QORGAN_ADMIN_OPEN_ACCESS=investigator`: посетитель без
+  ключа работает как `public-demo`, и всё по-прежнему пишется в журнал аудита, а для
+  полной расшифровки по-прежнему нужен код цели. Данные на демо — синтетические. Чтобы
+  вернуть вход по ключу, достаточно удалить переменную (ADR D59).
 - **Приватность, закреплённая тестами** (`tests/test_architecture.py`): аудио не принимает
   ни один маршрут; `/api/analyze` ничего не сохраняет; у хранилища аналитика ровно два
   входа; номера хранятся только как HMAC-дайджест + префикс `+7 700 ***`; расшифровки
@@ -386,6 +393,14 @@ answers (ADR D20). That log is a keyed hash chain (`QORGAN_AUDIT_CHAIN_KEY`):
 can **confirm / dismiss / merge** an organization; the verdict is stored as an append-only
 event keyed by the operation's numbers, so it survives re-clustering (a dismissed operation
 drops to 20 % priority; ADR D24). Per-person keys are a stand-in for SSO in a deployment.
+
+**Open demo access (on in the hosted demo).** `QORGAN_ADMIN_OPEN_ACCESS=analyst|investigator`
+(default `off`) admits a visitor *without* a key as the reserved identity `public-demo` in that
+role, so a jury can open the console without credentials. Only who may enter changes: every
+action is still audited, under `public-demo`, and the audit-chain key is still required. Roles
+and the stated purpose still apply. A presented key keeps its own identity, and a wrong key is
+still refused. Use it only on a server holding fabricated data: anyone with the URL can read
+what the role allows (ADR D59).
 
 ## Partner API (`/api/v1`) — consented reports in, aggregates out
 

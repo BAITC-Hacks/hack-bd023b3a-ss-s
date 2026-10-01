@@ -321,6 +321,7 @@ Service settings:
 |---|---|
 | Variables | `QORGAN_NUMBER_HMAC_KEY`, `QORGAN_AUDIT_CHAIN_KEY`, `QORGAN_ANALYST_KEYS` (§3). Railway passes them as environment variables, and there is no `.env` file in the container. `PORT` is set by Railway. |
 | Health check | path `/api/health`. The first start seeds Level 2 before the server listens (about 25 s on a laptop CPU). |
+| Open demo access (optional) | `QORGAN_ADMIN_OPEN_ACCESS=investigator` (or `analyst`) lets visitors without a key, such as a jury, into the console as `public-demo`. It is still audited. Use it only with fabricated data, and remove it to require keys again (ADR D59). |
 | Replicas | **1** (§1: in-process state) |
 | Volume (optional) | mount it at **`/app/data/processed`**, never at `/app/data`, which holds the lexicons and the taxonomy. Set **`RAILWAY_RUN_UID=0`**. |
 

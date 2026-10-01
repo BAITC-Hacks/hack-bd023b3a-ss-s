@@ -76,6 +76,25 @@ kept as history._
   calls with call content: `POST /api/reports`, `DELETE /api/reports/{receipt}`. Model load
   ~3 s from localhost, ~0.6 s first inference (WASM/WebGPU).
 
+## 2026-10-01 — open demo access for the jury (ADR D59)
+
+- `QORGAN_ADMIN_OPEN_ACCESS=investigator` on the hosted demo lets a visitor without a key
+  into the analyst console as `public-demo`. It is still audited, still needs the audit
+  key, and still needs a purpose for a full transcript. The default is `off` (keys required);
+  the README says so. **Switch it off before any real report could reach that server.**
+
+## 2026-10-01 — the analyst console after a deploy (ADR D58)
+
+- The D57 deploy was healthy, but the console showed *"Dashboard offline — API returned 401"*
+  with no sign-in. The old cache-first service worker served an `admin.js` cached before
+  sign-in existed. Fixed: the v7 worker reloads open pages once when it replaces a v1–v5
+  shell. A first try deadlocked (reload awaited inside activation) and is caught by the new
+  `sw.test.mjs`.
+- A first visit in English or Kazakh showed a false *"Your key is no longer accepted"*: the
+  language switch loaded the console before sign-in. Fixed, and verified against a local API.
+  Overlapping console loads now render only the newest.
+- **If a browser still shows the old page, reload once.**
+
 ## 2026-10-01 — the hardened image deploys on Railway again (ADR D57)
 
 - The Railway deploy of `2d0354b` failed. The PR #8 Dockerfile used BuildKit cache mounts,

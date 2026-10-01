@@ -1395,3 +1395,81 @@ vars and `PORT=8080`:
 **Not verified here.** No Railway log was read: there is no CLI or token in this workspace. The
 cache-mount failure is inferred from Railway's documented rule, not observed. Railway's real
 BuildKit version is unknown, which is why the Dockerfile no longer relies on newer syntax.
+
+### D58 — After a deploy, the analyst console reloads itself instead of serving a cached copy (2026-10-01)
+After the D57 deploy, the analyst console showed *"Dashboard offline — API returned 401"* with
+no sign-in form, although the server was healthy (`/api/admin/*` answers 401 without a key, as
+designed). Prod served the current files with `no-cache`; a clean browser got the sign-in.
+Three faults, all on the client:
+1. **The old service worker served the old page.** Shells v1–v5 were served cache-first
+   (stale-while-revalidate). On the first visit after a deploy, the old worker answers with its
+   cached `admin.html` and `admin.js`. An `admin.js` cached before the sign-in existed (ADR C4)
+   sends no key and prints exactly that message. The v6 worker installs and activates right
+   after, but the page on screen stays old until a manual reload. Reproduced in Chromium
+   (Playwright): old v4 site → visit → deploy `2d0354b` → visit. The page stays on the old
+   "analyst dashboard" after v6 activates.
+2. **The language switch loaded the console before sign-in.** `admin-lang.js` applies the
+   stored or browser language by firing `change` on the content radios. `admin.js` reloaded on
+   every `change`, so a keyless request got a 401, read as a revoked key. A first visit in
+   English or Kazakh showed a red *"Your key is no longer accepted — sign in again."*
+   Reproduced on prod.
+3. **Overlapping loads (latent).** A signed-in reload starts the session's load in the HTML's
+   default language, then the stored language starts a second. The slower answer rendered last.
+   It had no visible effect on the current seeds: the overview is the same in ru and kk, and
+   stats were already fetched in the final language. Its only cost was a duplicate stats request.
+
+**Change.** `sw.js` v7: when activation replaces a cache-first shell (`qorgan-shell-v1…v5`),
+the worker reloads its open pages once (`client.navigate`). Replacing a network-first shell
+(v6+) reloads nothing. The reload runs **outside** `waitUntil`: a navigation is handled only
+once the worker has activated, so awaiting it inside activation deadlocked. The first attempt
+did exactly that, and the page hung on "Loading" in Chromium. A content-language change
+reloads the console only when `me` is set. `load()` carries a sequence number, and an
+overtaken load renders nothing.
+**Evidence.** `tests_js/sw.test.mjs` runs the real `sw.js` activate handler in a fake worker
+scope where navigation completes only after activation. It caught the deadlock (*"activation
+never finished"*), and now passes v4 → reload both pages, first install and v6 → none.
+`tests_js/pages.test.mjs` pins the guard and the sequence check. `npm test` 70/70, `pytest`
+1311 passed. Chromium, same origin, v4 site → fixed site, one visit: the first render is the
+cached old page, then exactly one reload lands on the new console with sign-in. `admin.html`
+was requested twice in total and 0 times in the following 6 s, so no loop. Local API with a
+throwaway key on a scratch data dir: a fresh visit with a stored `en` or `kk` makes **no**
+`/api/admin` request and shows no note; sign-in → `session`, `overview?locale=ru`, `stats` all
+200; switching to ҚАЗ → `overview?locale=kk`, `stats?locale=kk`.
+**Not covered.** A browser whose worker cached the old page and that never visits again keeps
+it; nothing can reach it. Browsers that visited before this change and already moved to v6 are
+unaffected: v6 is network-first.
+
+### D59 — Open demo access to the analyst console, off by default (2026-10-01)
+The jury has no analyst key, so on the hosted demo it cannot see Level 2. The team decided to
+switch the restricted access off **for the demo** and to state in the README that it exists.
+**Change.** `QORGAN_ADMIN_OPEN_ACCESS` = `off` (default) | `analyst` | `investigator`. When it
+is set, `require_analyst` serves a request carrying **no** key as the reserved identity
+`public-demo` (now in `RESERVED_IDS`, so no configured analyst can take it) in that role. The
+rest of invariant 7 is untouched:
+- every route still goes through `require_analyst`;
+- every action is audited, under `public-demo`;
+- the audit-chain key is still required (503 without it);
+- the role and the stated purpose still gate a full transcript;
+- the per-identity rate limits and the hourly open budget still apply, shared by all visitors;
+- a presented key keeps its own identity, and a wrong key is still a 401.
+
+Personal keys become optional while the switch is on. `GET /api/admin/session` reports
+`open_access`. The page tries a keyless session when it holds no key and skips the sign-in only
+when the server reports `open_access: true`. It then shows "open demo access" and the audited
+identity, with no sign-out.
+**Why a switch, not a deletion.** Requiring keys again is one deleted variable. The default stays
+fail-closed, so `tests/test_architecture.py` and the auth tests keep guarding it. The privacy story
+is still true for a real deployment.
+**Cost, on record.** While it is on, anyone with the URL holds the configured role. With
+`investigator` they can open full (scrubbed) transcripts of every report on the server, including
+any a real visitor submits on the public demo. Acceptable only while the server holds fabricated
+data; switch it off before any real report could arrive (`docs/DEPLOY.md` §7).
+**Evidence.** `tests/test_api_admin_open_access.py` (9): off by default → 401; an unknown value
+is a config error; the identity is reserved; `analyst` → console 200 and a full transcript 403,
+with the refusal audited as `public-demo`; `investigator` → open with a purpose, audited as
+`(public-demo, pattern_review)`; a personal key keeps its identity; a wrong key → 401; no
+personal keys needed, but no audit key → 503. `tests_js/pages.test.mjs` pins the page's probe.
+`pytest` 1320 passed, `npm test` 71/71. Local API with `QORGAN_ADMIN_OPEN_ACCESS=investigator`
+in Chromium: a fresh visit opens the console without sign-in (500 incidents, 5 organizations),
+the `/api/admin` requests are session, overview and stats, all 200, and the audit log reads
+`public-demo session.start ok:investigator`.

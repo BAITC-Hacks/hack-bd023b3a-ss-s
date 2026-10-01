@@ -99,7 +99,8 @@
 
   // Every console request carries the key; a 401 ends the session (key revoked or rotated).
   const api = async (path, opts = {}) => {
-    const headers = { ...(opts.headers || {}), "X-Analyst-Key": analystKey };
+    // Keyless only on a server with open demo access (ADR D59): it answers as `public-demo`.
+    const headers = { ...(opts.headers || {}), ...(analystKey ? { "X-Analyst-Key": analystKey } : {}) };
     const res = await fetch(path, { ...opts, headers, cache: "no-store" });
     if (res.status === 401) {
       endSession("Your key is no longer accepted — sign in again.", "error");
@@ -610,7 +611,13 @@
     }
   };
 
+  // Loads overlap (a sign-in completing while the language switch applies the stored locale,
+  // a quick language change): only the newest may render, or a slower answer in the previous
+  // language overwrites it.
+  let loadSeq = 0;
   const load = async () => {
+    const seq = ++loadSeq;
+    const stale = () => seq !== loadSeq;
     kpisEl.setAttribute("aria-busy", "true");
     analysisCache.clear(); // locale-dependent names; cheap to re-score on demand
     openNotes.clear();
@@ -619,6 +626,7 @@
       const res = await api(`/api/admin/overview?locale=${locale()}`);
       if (!res.ok) throw new Error(await errorDetail(res));
       const body = await res.json();
+      if (stale()) return;
 
       if (!body.available) {
         kpisEl.innerHTML = "";
@@ -633,9 +641,9 @@
       renderKpis(body.kpis);
       renderNovel(orgs);
       renderQueue();
-      await loadStats();
+      await loadStats(stale);
     } catch (e) {
-      if (e instanceof AuthError) return;
+      if (e instanceof AuthError || stale()) return;
       kpisEl.innerHTML = "";
       novelEl.innerHTML = "";
       statsSection.hidden = true;
@@ -645,18 +653,19 @@
           "<code>python -m qorgan.api</code>."
       );
     } finally {
-      kpisEl.removeAttribute("aria-busy");
+      if (!stale()) kpisEl.removeAttribute("aria-busy");
     }
   };
 
   // Statistics are additive — a failure here must never take the dashboard down.
-  const loadStats = async () => {
+  const loadStats = async (stale = () => false) => {
     try {
       const res = await api(`/api/admin/stats?locale=${locale()}`);
       if (!res.ok) throw new Error(`API returned ${res.status}`);
-      renderStats(await res.json());
+      const body = await res.json();
+      if (!stale()) renderStats(body);
     } catch {
-      statsSection.hidden = true;
+      if (!stale()) statsSection.hidden = true;
     }
   };
 
@@ -808,9 +817,33 @@
     consoleEl.hidden = false;
     toolbarEl.hidden = false;
     sessionEl.hidden = false;
+    const keyless = !analystKey;
+    if (signOutBtn) signOutBtn.hidden = keyless;
     whoEl.innerHTML =
-      `signed in as <b>${esc(me.id)}</b> <span class="adm-role adm-role--${esc(me.role)}">${esc(me.role)}</span>` +
+      (keyless
+        ? `open demo access <span class="adm-role adm-role--${esc(me.role)}">${esc(me.role)}</span>` +
+          ' <span class="adm-who-note">no sign-in on this demo server; every action is still audited as ' +
+          `<b>${esc(me.id)}</b></span>`
+        : `signed in as <b>${esc(me.id)}</b> <span class="adm-role adm-role--${esc(me.role)}">${esc(me.role)}</span>`) +
       (me.can_open_cases ? "" : ' <span class="adm-who-note">aggregates &amp; excerpts; opening a transcript needs an investigator</span>');
+  };
+
+  // A server with open demo access (QORGAN_ADMIN_OPEN_ACCESS, ADR D59) admits a keyless visitor
+  // as `public-demo`; anywhere else this answers 401 and the sign-in stays.
+  const tryOpenAccess = async () => {
+    try {
+      const res = await fetch("/api/admin/session", { cache: "no-store" });
+      const body = res.ok ? await res.json() : null;
+      if (!body?.open_access) {
+        showSignin();
+        return;
+      }
+      me = body;
+      showConsole();
+      await load();
+    } catch {
+      showSignin();
+    }
   };
 
   // Forget the key and everything rendered with it.
@@ -889,7 +922,10 @@
   );
   document
     .querySelectorAll('input[name="adm-loc"]')
-    .forEach((radio) => radio.addEventListener("change", load));
+    // admin-lang.js fires this on page load; before sign-in there is nothing to reload (and a
+    // keyless request would read as a revoked key). A session in progress loads in the
+    // language checked when it completes.
+    .forEach((radio) => radio.addEventListener("change", () => { if (me) load(); }));
   refreshBtn?.addEventListener("click", load);
   ingestBtn?.addEventListener("click", runIngest);
   modalClose.addEventListener("click", closeModal);
@@ -899,5 +935,5 @@
   });
 
   if (analystKey) startSession(analystKey);
-  else showSignin();
+  else tryOpenAccess();
 })();
