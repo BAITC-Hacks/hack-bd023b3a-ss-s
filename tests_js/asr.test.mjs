@@ -196,3 +196,56 @@ test("locking: off by default — the shipped behaviour is unchanged", () => {
   }
   assert.deepEqual(state.languages, ["kk", "ru"]);
 });
+
+// English in the voice mode (ADR D62). On kk/ru speech the English model returns confident-
+// looking garbage (0.7-0.85 on clean synthesized Russian); a plain vote handed it 12.9 % of
+// kk/ru utterances. English therefore ranks with (confidence - handicap).
+test("voteFinal: a handicapped language must beat the others by its handicap", () => {
+  const ru = { text: "что какая сумма", confidence: 0.86 };
+  const garbage = { text: "to cook i assume", confidence: 0.9 };
+  assert.equal(voteFinal({ ru, en: garbage }, "ru").language, "en", "no handicap: the louder garbage wins");
+  assert.equal(voteFinal({ ru, en: garbage }, "ru", { en: 0.15 }).language, "ru");
+  const english = { text: "this is your bank security team", confidence: 0.97 };
+  const won = voteFinal({ ru: { text: "зис из ёр бэнк", confidence: 0.6 }, en: english }, "ru", { en: 0.15 });
+  assert.deepEqual(won, { language: "en", text: english.text, confidence: 0.97 }, "the real confidence is reported");
+});
+
+test("voteFinal: without a handicap the kk/ru vote is unchanged", () => {
+  const kk = { text: "кодты айтыңыз", confidence: 0.9 };
+  const ru = { text: "коды айтыныз", confidence: 0.6 };
+  assert.deepEqual(voteFinal({ kk, ru }, "ru", { en: 0.15 }), voteFinal({ kk, ru }, "ru"));
+});
+
+test("reduceAsrEvent: the handicap reaches the vote", () => {
+  let state = initialAsrState(["kk", "ru", "en"]);
+  const opts = { handicap: { en: 0.15 } };
+  const result = (language, text, conf) => ({ type: "result", language, detail: { text, result: text.split(" ").map((word) => ({ word, conf })) } });
+  state = reduceAsrEvent(state, result("kk", "что кагай сумма", 0.79), 0, opts).state;
+  state = reduceAsrEvent(state, result("ru", "что какая сумма", 0.86), 10, opts).state;
+  const out = reduceAsrEvent(state, result("en", "to cook i assume", 0.9), 20, opts);
+  assert.equal(out.emits[0].language, "ru");
+});
+
+// ADR D62: English is optional. If its model fails to load, the voice mode must still start
+// with Kazakh and Russian -- a new language never takes down the two that work.
+test("createDeviceAsr: an optional language that fails to load is skipped; a required one is fatal", async () => {
+  const { createDeviceAsr } = await import("../site/core/asr.js");
+  const models = { kk: { id: "kk", url: "kk.tgz" }, ru: { id: "ru", url: "ru.tgz" }, en: { id: "en", url: "en.tgz" } };
+  const statuses = [];
+  const fakeModule = (failing) => ({
+    createModel: async (url) => { if (failing.includes(url)) throw new Error(`cannot fetch ${url}`); return { url }; },
+    cleanUp: async () => {},
+  });
+  const previous = globalThis.loadVosklet;
+  try {
+    globalThis.loadVosklet = async () => fakeModule(["en.tgz"]);
+    const asr = await createDeviceAsr({ models, optional: ["en"], onPartial() {}, onUtterance() {}, onStatus: (m, info) => statuses.push(info) });
+    assert.deepEqual(asr.languages, ["kk", "ru"]);
+    assert.ok(statuses.some((s) => s.code === "model_skipped" && s.language === "en"));
+
+    globalThis.loadVosklet = async () => fakeModule(["ru.tgz"]);
+    await assert.rejects(createDeviceAsr({ models, optional: ["en"], onPartial() {}, onUtterance() {} }), /ru\.tgz/);
+  } finally {
+    globalThis.loadVosklet = previous;
+  }
+});

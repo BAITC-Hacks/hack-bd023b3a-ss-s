@@ -1544,3 +1544,62 @@ fine (4.2 s warm-up, 768-d). The failure depends on the browser engine. Two inde
 **Cost.** The page no longer works offline for the WASM runtimes. They now depend on the HTTP
 cache, which revalidates (`no-cache`), and offline mic mode was never verified anyway. The
 image gains about 22 MB.
+
+### D62 — English joins the voice mode as a handicapped third recogniser (2026-10-01)
+The voice mode recognised only Kazakh and Russian, while English was already a content locale
+(D52) and a call language for the classifier (D54). Requested: English in the voice mode, "even a
+little". Added `vosk-model-small-en-us-0.15` (41 MB tarball) as a third Vosklet recogniser in the
+per-utterance confidence vote.
+**The risk, measured first.** On Kazakh/Russian speech the English model returns confident-looking
+garbage, for example "the grass to you mean yes" at 0.71 for a Russian sentence. Measured on `val`
+(never a held-out split), with every utterance synthesised (macOS voices Aru, Milena, Samantha)
+and decoded by all three models (`scripts/spikes/asr_english/capture_tri.py`, 882 kk/ru/mixed + 165
+en utterances in `data/asr_capture/tri_val*.jsonl`). The shipped `voteFinal` was replayed with an
+English handicap h (English ranks with confidence − h; `vote_sweep.mjs`):
+
+| h | English wins on kk/ru/mixed | English wins on English |
+|---|---|---|
+| 0 (plain vote) | 4.8 % | 97.0 % |
+| 0.10 | 1.6 % | 85.5 % |
+| **0.15** | **1.0 %** | **65.5 %** |
+| 0.20 | 0.7 % | 40.6 % |
+
+**Downstream, through the live meter** (`meter_replay.py`, the Python pipeline 1:1 with the
+browser, served weights):
+- English `val` dialogues, voice mode vs. reference text: scams latched **15/15** at h = 0.15,
+  the same as the reference and up from **6/15** with English off; legitimate calls 1/8 vs 1/8
+  on the reference (the D54 weakness, not added by ASR).
+- kk/ru/mixed: at h = 0.15 the vote winner changes on 9 of 882 utterances, all in **2
+  legitimate dialogues** (fragments such as "алло с" → "hello"). Replayed: English off, 1 of the
+  2 falsely latched; English on, 0 of 2. The other 110 dialogues have identical winners, so
+  identical outcomes. h = 0.10 gave the same English result for more kk/ru churn, so 0.15
+  ships.
+
+**Change.**
+- `voteFinal(hypotheses, preferred, handicap)` ranks with confidence − handicap and reports the
+  real confidence, which the meter uses.
+- The reducer and the `stop()` flush pass the handicap through.
+- `createDeviceAsr({optional})` skips an optional language whose model fails to load, so English
+  can never take down kk/ru; a required one is still fatal.
+- Config: `QORGAN_VOSK_MODEL_EN` (`""` = off) and `QORGAN_ASR_EN_HANDICAP` (0.15).
+  `qorgan-config.json` gains `asr.order` (kk, ru, en) because the writer sorts keys and English
+  would otherwise be the first language and win ties; `asr.handicap` and `asr.optional` are
+  added too.
+- Bootstrap packages the model. i18n gains `lang_name.en`, `lang_short.en` and
+  `mic.model_skipped`; the mic description says English is in test mode. The speech download
+  disclosure goes from 106 to 147 MB.
+- The Python `vosk_stream` dev harness stays kk/ru.
+
+**Evidence.**
+- Tests: `asr.test.mjs` (handicap, kk/ru vote unchanged, the reducer, optional skip vs required
+  fatal), `test_client_config.py` (order, handicap, off switch), `pages.test.mjs` (the page
+  builds in `asr.order`), `i18n.test.mjs` (every voice-mode language named in every locale — it
+  caught the missing `lang_short.en`). `pytest` 1329, `npm test` 78/78.
+- Real page in Chromium, synthesised calls through the fake microphone:
+  - English scam call: 3 of 5 sentences recognised as English almost verbatim ("read me the code
+    now quickly", 100 %), meter 50/100 on a 5-sentence call.
+  - Russian scam call: 5/5 "рус", 90–100 %, meter **96/100**.
+
+**Limits, on record.** Synthesised, clean audio, not a speakerphone. About a third of English
+utterances still go to kk/ru (the handicap's price). English classification keeps its D54
+false-alarm rate on sales calls. "Test mode" in the UI says so.

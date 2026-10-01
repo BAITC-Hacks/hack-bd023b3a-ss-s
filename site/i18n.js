@@ -85,7 +85,7 @@ const ru = {
   "model.preparing": "Готовим модель анализа…",
   "model.ready": "Модель готова. Разговор анализируется только на этом устройстве.",
 
-  "mic.copy": "Включите на телефоне громкую связь и положите его рядом с компьютером. Qorğan слушает через микрофон компьютера и распознаёт казахскую и русскую речь прямо здесь — звук никуда не отправляется и не записывается. Пока это работает только в браузере на компьютере.",
+  "mic.copy": "Включите на телефоне громкую связь и положите его рядом с компьютером. Qorğan слушает через микрофон компьютера и распознаёт казахскую и русскую речь (английскую — в тестовом режиме) прямо здесь — звук никуда не отправляется и не записывается. Пока это работает только в браузере на компьютере.",
   "mic.start": "Включить микрофон",
   "mic.stop": "Завершить звонок",
   "mic.ready": "Распознавание речи работает на этом устройстве — звук не покидает браузер.",
@@ -97,6 +97,7 @@ const ru = {
   "mic.loading_model": "Загружаем модель речи ({language}) — только в первый раз…",
   "mic.listening": "Слушаем. Звук остаётся на этом устройстве.",
   "mic.stopped": "Микрофон выключен.",
+  "mic.model_skipped": "Модель речи ({language}) не загрузилась — продолжаем без неё.",
   "mic.permission": "Разрешите доступ к микрофону в окне браузера…",
   "mic.start_failed": "Не удалось включить микрофон ({error}).",
   "mic.no_speech": "Речь не распознана. Проверьте громкость и попробуйте ещё раз.",
@@ -106,8 +107,10 @@ const ru = {
 
   "lang_name.kk": "казахский",
   "lang_name.ru": "русский",
+  "lang_name.en": "английский",
   "lang_short.kk": "каз",
   "lang_short.ru": "рус",
+  "lang_short.en": "англ",
 
   "call.head": "Звонок · фраз: {n}",
   "call.meter_label": "Уровень подозрения",
@@ -293,7 +296,7 @@ const kk = {
   "model.preparing": "Талдау моделі дайындалуда…",
   "model.ready": "Модель дайын. Әңгіме тек осы құрылғыда талданады.",
 
-  "mic.copy": "Телефоныңызда динамикті қосып, оны компьютердің жанына қойыңыз. Qorğan компьютердің микрофоны арқылы тыңдап, қазақ және орыс тіліндегі сөзді осы жерде таниды — дыбыс ешқайда жіберілмейді және жазылмайды. Әзірге бұл тек компьютердегі браузерде жұмыс істейді.",
+  "mic.copy": "Телефоныңызда динамикті қосып, оны компьютердің жанына қойыңыз. Qorğan компьютердің микрофоны арқылы тыңдап, қазақ және орыс тіліндегі сөзді (ағылшын тілін — сынақ режимінде) осы жерде таниды — дыбыс ешқайда жіберілмейді және жазылмайды. Әзірге бұл тек компьютердегі браузерде жұмыс істейді.",
   "mic.start": "Микрофонды қосу",
   "mic.stop": "Қоңырауды аяқтау",
   "mic.ready": "Сөзді тану осы құрылғыда жұмыс істейді — дыбыс браузерден шықпайды.",
@@ -305,6 +308,7 @@ const kk = {
   "mic.loading_model": "Сөз моделі жүктелуде ({language}) — тек алғаш рет…",
   "mic.listening": "Тыңдап тұрмыз. Дыбыс осы құрылғыда қалады.",
   "mic.stopped": "Микрофон өшірілді.",
+  "mic.model_skipped": "Сөйлеу моделі ({language}) жүктелмеді — онсыз жалғастырамыз.",
   "mic.permission": "Браузер терезесінде микрофонға рұқсат беріңіз…",
   "mic.start_failed": "Микрофон қосылмады ({error}).",
   "mic.no_speech": "Сөз танылмады. Дыбыс деңгейін тексеріп, қайталап көріңіз.",
@@ -314,8 +318,10 @@ const kk = {
 
   "lang_name.kk": "қазақ тілі",
   "lang_name.ru": "орыс тілі",
+  "lang_name.en": "ағылшын тілі",
   "lang_short.kk": "қаз",
   "lang_short.ru": "орыс",
+  "lang_short.en": "ағыл",
 
   "call.head": "Қоңырау · фразалар саны: {n}",
   "call.meter_label": "Күдік деңгейі",
@@ -501,7 +507,7 @@ const en = {
   "model.preparing": "Preparing the analysis model…",
   "model.ready": "Model ready. The call is analysed only on this device.",
 
-  "mic.copy": "Put your phone on speaker next to the computer. Qorğan listens through the computer’s microphone and recognises Kazakh and Russian speech right here — audio is never sent anywhere or recorded. For now this works only in a desktop browser.",
+  "mic.copy": "Put your phone on speaker next to the computer. Qorğan listens through the computer’s microphone and recognises Kazakh and Russian speech (English in test mode) right here — audio is never sent anywhere or recorded. For now this works only in a desktop browser.",
   "mic.start": "Turn on the microphone",
   "mic.stop": "End the call",
   "mic.ready": "Speech recognition runs on this device — audio never leaves the browser.",
@@ -513,6 +519,7 @@ const en = {
   "mic.loading_model": "Loading the speech model ({language}) — first time only…",
   "mic.listening": "Listening. Audio stays on this device.",
   "mic.stopped": "Microphone off.",
+  "mic.model_skipped": "The {language} speech model did not load — continuing without it.",
   "mic.permission": "Allow microphone access in the browser prompt…",
   "mic.start_failed": "Could not turn on the microphone ({error}).",
   "mic.no_speech": "No speech was recognised. Check the volume and try again.",
@@ -522,8 +529,10 @@ const en = {
 
   "lang_name.kk": "Kazakh",
   "lang_name.ru": "Russian",
+  "lang_name.en": "English",
   "lang_short.kk": "KK",
   "lang_short.ru": "RU",
+  "lang_short.en": "EN",
 
   "call.head": "Call · phrases: {n}",
   "call.meter_label": "Suspicion level",

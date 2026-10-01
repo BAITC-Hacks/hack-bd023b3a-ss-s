@@ -53,7 +53,7 @@ const TURN_DELAY_MS = 1200;
 // One-time downloads, disclosed before they start (site/models/): e5-base int8 ONNX 279 MB +
 // tokenizer 17 MB; the two Vosk tarballs 60 MB (kk) + 46 MB (ru).
 const MODEL_MB = 300;
-const SPEECH_MB = 106;
+const SPEECH_MB = 147; // kk 60 + ru 46 + en 41 MB tarballs (ADR D62)
 // The summary's "why" sentence quotes the first few flagged phrases; all of them are already
 // highlighted in the transcript above, and quoting every one turns the reason into a wall.
 const MAX_REASON_PHRASES = 3;
@@ -66,7 +66,7 @@ const MIC_REASON = {
   capture: "mic.reason_capture",
   phone: "mic.reason_phone",
 };
-const ASR_STATUS = { runtime: "mic.loading_runtime", model: "mic.loading_model", listening: "mic.listening", stopped: "mic.stopped" };
+const ASR_STATUS = { runtime: "mic.loading_runtime", model: "mic.loading_model", model_skipped: "mic.model_skipped", listening: "mic.listening", stopped: "mic.stopped" };
 
 // ── language ─────────────────────────────────────────────────────────────────
 
@@ -571,10 +571,18 @@ const checkMicCapability = async () => {
   setNote(modeNote, "mic.unavailable", { reasons });
 };
 
-const modelSpecs = (cfg) =>
-  Object.fromEntries(
-    Object.entries(cfg.asr?.models || {}).map(([language, m]) => [language, { id: m.id, url: new URL(ASR_MODELS_BASE + m.url, location.href).href }])
+// In `asr.order` (kk, ru, en -- ADR D62): the JSON's keys are sorted, and the first language is
+// the recogniser's initial preference for ties and the first partial shown.
+const modelSpecs = (cfg) => {
+  const models = cfg.asr?.models || {};
+  const order = cfg.asr?.order || Object.keys(models);
+  return Object.fromEntries(
+    order.filter((language) => models[language]).map((language) => {
+      const m = models[language];
+      return [language, { id: m.id, url: new URL(ASR_MODELS_BASE + m.url, location.href).href }];
+    })
   );
+};
 
 const onMicUtterance = ({ text, confidence, language }) => {
   micQueue = micQueue
@@ -606,6 +614,8 @@ const startMic = async () => {
       asr = await createDeviceAsr({
         models: modelSpecs(rt.config),
         lock: rt.config.asr?.lock ?? null,
+        handicap: rt.config.asr?.handicap ?? null,
+        optional: rt.config.asr?.optional ?? [],
         onPartial: ({ text }) => showPartial(text),
         onUtterance: onMicUtterance,
         onStatus: (_message, info = {}) => {

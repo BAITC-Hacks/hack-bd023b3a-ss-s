@@ -133,3 +133,17 @@ test("t() fills params, resolves key params, escapes only in tHtml, and falls ba
   assert.equal(t("kk", "no.such_key"), "no.such_key");
   assert.equal(t("ru", "call.head"), "Звонок · фраз: {n}", "a missing param stays visible, never 'undefined'");
 });
+
+// ADR D62: every voice-mode language is named in every locale -- the transcript tags each line
+// with `lang_short.<language>` and the loading note says `lang_name.<language>`; a missing key
+// rendered as the raw key on the first English line.
+test("every voice-mode language has a full and a short name in every locale", () => {
+  const config = JSON.parse(readFileSync(join(REPO, "site", "core", "qorgan-config.json"), "utf8"));
+  for (const locale of LOCALES) {
+    for (const language of config.asr.order) {
+      for (const key of [`lang_name.${language}`, `lang_short.${language}`]) {
+        assert.ok(STRINGS[locale][key], `${locale}: missing ${key}`);
+      }
+    }
+  }
+});

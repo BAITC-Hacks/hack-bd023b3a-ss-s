@@ -251,7 +251,10 @@ def ensure_asr_models() -> None:
     except Exception as exc:  # noqa: BLE001 - offline / tampered download: mic mode reports it
         _log(f"asr runtime: unavailable ({exc}); microphone mode will report it")
     cfg = get_config()
-    for name in (cfg.vosk_model_kk, cfg.vosk_model_ru):
+    # English is the optional third recogniser (ADR D62); "" in QORGAN_VOSK_MODEL_EN skips it.
+    for name in (cfg.vosk_model_kk, cfg.vosk_model_ru, cfg.vosk_model_en):
+        if not name:
+            continue
         try:
             target = ensure_vosk_model_tarball(name, site_models_dir=SITE_MODELS)
             _log(f"asr model: {target.relative_to(REPO_ROOT)} ({target.stat().st_size / 1e6:.0f} MB)")

@@ -87,10 +87,14 @@ def export_client_config() -> dict[str, Any]:
         # On-device speech recognition (PLAN B9): the same small Vosk models the July
         # server path used, self-hosted as USTAR tarballs under site/models/vosk/.
         "asr": {
-            "models": {
-                "kk": {"id": cfg.vosk_model_kk, "url": f"{WEB_ASR_MODELS_SUBDIR}/{cfg.vosk_model_kk}.tar.gz"},
-                "ru": {"id": cfg.vosk_model_ru, "url": f"{WEB_ASR_MODELS_SUBDIR}/{cfg.vosk_model_ru}.tar.gz"},
-            },
+            # Vote order (ties, the first partial shown): kk, ru, then en. A list, because the
+            # JSON is written with sorted keys and `models` would arrive as en, kk, ru.
+            "order": [language for language, _ in _asr_model_names(cfg)],
+            "models": {language: _asr_model(name) for language, name in _asr_model_names(cfg)},
+            # Subtracted from a language's confidence before the vote (ADR D62).
+            "handicap": {"en": cfg.asr_en_handicap} if cfg.vosk_model_en else {},
+            # Languages the voice mode may start without when their model fails to load.
+            "optional": ["en"] if cfg.vosk_model_en else [],
             "sample_rate": cfg.asr_sample_rate,
             # null = both recognisers run for the whole call (ADR D40).
             "lock": ({"after": cfg.asr_lock_after, "confFloor": cfg.asr_lock_conf_floor}
@@ -101,6 +105,16 @@ def export_client_config() -> dict[str, Any]:
 
 # Relative to site/models/ (the page resolves it against `models/`).
 WEB_ASR_MODELS_SUBDIR = "vosk"
+
+
+def _asr_model_names(cfg) -> list[tuple[str, str]]:
+    """The voice mode's recognisers in vote order; English only when configured (ADR D62)."""
+    names = [("kk", cfg.vosk_model_kk), ("ru", cfg.vosk_model_ru)]
+    return names + ([("en", cfg.vosk_model_en)] if cfg.vosk_model_en else [])
+
+
+def _asr_model(name: str) -> dict[str, str]:
+    return {"id": name, "url": f"{WEB_ASR_MODELS_SUBDIR}/{name}.tar.gz"}
 
 
 def web_model_id(onnx_dir: Path) -> str:
