@@ -71,11 +71,35 @@ async function activateWith(cacheNames) {
 // returned 401"). Replacing such a worker reloads the open pages once, from the network.
 test("replacing a cache-first (v1-v5) shell reloads the open pages", async () => {
   const { deleted, navigated } = await activateWith(["qorgan-shell-v4", "qorgan-models-v1"]);
-  assert.deepEqual(deleted, ["qorgan-shell-v4"]);
+  assert.deepEqual(deleted, ["qorgan-shell-v4", "qorgan-models-v1"]); // models-v1 held the ONNX copy (D61)
   assert.deepEqual(navigated, ["https://host/admin.html", "https://host/live.html"]);
 });
 
 test("a first install or a network-first predecessor reloads nothing", async () => {
   assert.deepEqual((await activateWith([])).navigated, []);
-  assert.deepEqual((await activateWith(["qorgan-shell-v6", "qorgan-models-v1"])).navigated, []);
+  assert.deepEqual((await activateWith(["qorgan-shell-v6", "qorgan-models-v2"])).navigated, []);
+});
+
+// Firefox stops a service worker ~30 s into an event, cutting off any response it is still
+// streaming. The 278 MB model routed through the worker failed on prod with "Error in input
+// stream" after ~32 s (it loads with service workers blocked). Large binaries bypass the
+// worker; transformers.js keeps the model in its own Cache API store (ADR D61).
+test("large binaries are never streamed through the service worker", () => {
+  const handlers = {};
+  const self = { location: { origin: "https://host" }, addEventListener: (t, fn) => { handlers[t] = fn; }, skipWaiting() {}, clients: {} };
+  const source = readFileSync(join(REPO, "site", "sw.js"), "utf8");
+  const cache = { match: async () => undefined, put: async () => {} };
+  const caches = { open: async () => cache };
+  new Function("self", "caches", "fetch", "URL", source)(self, caches, async () => ({ ok: false }), URL);
+  const intercepted = (path) => {
+    let responded = false;
+    const respondWith = (promise) => { responded = true; Promise.resolve(promise).catch(() => {}); };
+    handlers.fetch({ request: { url: `https://host${path}`, method: "GET", mode: "cors" }, respondWith });
+    return responded;
+  };
+  assert.equal(intercepted("/models/Xenova/multilingual-e5-base/onnx/model_quantized.onnx"), false);
+  assert.equal(intercepted("/vendor/transformers/3.8.1/ort-wasm-simd-threaded.jsep.wasm"), false);
+  assert.equal(intercepted("/vendor/vosklet/Vosklet.wasm"), false);
+  assert.equal(intercepted("/live.js"), true, "the shell stays network-first through the worker");
+  assert.equal(intercepted("/models/weights.json"), true);
 });

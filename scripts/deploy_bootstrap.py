@@ -204,6 +204,15 @@ def ensure_embedder() -> None:
         _log(f"web model: WARNING {target} is incomplete and is not the Hub graph -- nothing downloaded")
 
 
+def ensure_embed_runtime() -> None:
+    """Self-host transformers.js + onnxruntime-web for the browser embedder (ADR D61). Required:
+    the citizen page cannot score without it, and a CDN import is blocked by COEP in WebKit."""
+    from qorgan.web.embed_runtime import ensure_embed_runtime as install
+
+    target = install(REPO_ROOT / "site")
+    _log(f"web runtime: {target.relative_to(REPO_ROOT)} (pinned, hash-verified)")
+
+
 def _web_weights_usable(path: Path) -> bool:
     from qorgan.classifier.web_bundle import load_linear_from_web
 
@@ -271,6 +280,7 @@ def main(argv: list[str] | None = None) -> None:
     ensure_corpus()
     ensure_dialogue_pool()
     ensure_embedder()  # first: everything below embeds through it
+    ensure_embed_runtime()
     source = ensure_model()
     if phase == "all":
         ensure_l2_seeds()

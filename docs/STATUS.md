@@ -76,6 +76,16 @@ kept as history._
   calls with call content: `POST /api/reports`, `DELETE /api/reports/{receipt}`. Model load
   ~3 s from localhost, ~0.6 s first inference (WASM/WebGPU).
 
+## 2026-10-01 — the microphone in Safari and Firefox (ADR D61)
+
+- "embedding worker failed to load" was WebKit (Safari and every iPhone browser) refusing the
+  worker's jsDelivr import under the page's COEP. transformers.js and the ONNX-runtime WASM are
+  now self-hosted, pinned and hash-checked, with COEP on `/vendor/`.
+- Firefox cut the 278 MB model download at about 30 s because the service worker streamed it.
+  `.onnx` and `.wasm` now bypass the service worker.
+- Verified in Chromium, Firefox and WebKit behind a prod-like 5 MB/s throttle. The
+  microphone reaches "Слушаем" in Chromium and Firefox.
+
 ## 2026-10-01 — health check vs. seeding (ADR D60)
 
 - PR #10's deploy failed Railway's 5-minute health check: the server seeded Level 2 before

@@ -312,8 +312,10 @@ deploy it failed. `tests/test_dockerfile_portability.py` keeps these rules:
   health check in the service settings instead.
 - **The clone has no models.** `site/models/Xenova`, `site/models/vosk` and `site/vendor` are
   gitignored. On Railway, the bootstrap step of the build downloads them: the embedder from
-  the Hub, and the Vosk models and runtime pinned and hash-checked. This adds about 3 minutes
-  to the build.
+  the Hub, and the Vosk models and runtime pinned and hash-checked. It also downloads the
+  browser embedder's runtime (transformers.js plus the ONNX-runtime WASM, also pinned and
+  hash-checked, ADR D61). That download is **required**: a CDN import is blocked by COEP in
+  Safari, so the build fails without it. This adds about 3 minutes to the build.
 
 Service settings:
 
